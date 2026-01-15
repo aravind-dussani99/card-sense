@@ -1,0 +1,47 @@
+import { Metadata } from "next";
+import { MainNav } from "@/components/main-nav";
+import { TransactionsList } from "@/components/transactions-list";
+import { getCards } from "@/app/actions/card-actions";
+import { getCategories } from "@/app/actions/category-actions";
+import { getTransactions } from "@/app/actions/transaction-actions";
+
+export const metadata: Metadata = {
+    title: "Transactions - CardSense",
+    description: "View and manage all your transactions.",
+}
+
+export default async function TransactionsPage() {
+    const [cards, transactions, categories] = await Promise.all([
+        getCards(),
+        getTransactions({ limit: 200 }),
+        getCategories(),
+    ]);
+
+    return (
+        <div className="flex flex-col min-h-screen bg-slate-50">
+            <div className="border-b bg-white/80 backdrop-blur-md shadow-sm">
+                <div className="flex h-16 items-center px-4">
+                    <h1 className="text-xl font-bold mr-8 bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">CardSense</h1>
+                    <MainNav className="mx-6" />
+                </div>
+            </div>
+            <div className="mx-auto w-full max-w-7xl px-6 py-10 flex-1">
+                <div className="flex items-center justify-between mb-6">
+                    <div>
+                        <p className="text-sm font-semibold text-indigo-500 tracking-wider uppercase">Transactions</p>
+                        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">All transactions</h1>
+                        <p className="mt-1 text-base text-slate-600">
+                            Sync, filter, review, and add cash transactions from one place.
+                        </p>
+                    </div>
+                </div>
+
+                <TransactionsList
+                    initialTransactions={transactions}
+                    cards={cards}
+                    categories={categories}
+                />
+            </div>
+        </div>
+    );
+}

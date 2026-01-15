@@ -1,0 +1,75 @@
+export const MOCK_CARDS = [
+    {
+        id: "c1",
+        name: "Chase Sapphire Reserve",
+        last4: "4242",
+        network: "Visa",
+        limit: 25000,
+        balance: 1245.50,
+        dueDate: "2023-12-15",
+        color: "bg-blue-900",
+    },
+    {
+        id: "c2",
+        name: "Amex Gold",
+        last4: "1005",
+        network: "Amex",
+        limit: 0, // No preset limit
+        balance: 3450.20,
+        dueDate: "2023-12-20",
+        color: "bg-yellow-600",
+    },
+    {
+        id: "c3",
+        name: "Citi Double Cash",
+        last4: "8899",
+        network: "Mastercard",
+        limit: 10000,
+        balance: 500.00,
+        dueDate: "2023-12-25",
+        color: "bg-green-700",
+    },
+];
+
+export const MOCK_TRANSACTIONS = [
+    {
+        id: "t1",
+        cardId: "c1",
+        merchant: "Starbucks",
+        amount: 5.45,
+        date: "2023-12-01T08:30:00Z",
+        category: "Food & Drink",
+    },
+    {
+        id: "t2",
+        cardId: "c2",
+        merchant: "Delta Airlines",
+        amount: 450.00,
+        date: "2023-11-30T14:15:00Z",
+        category: "Travel",
+    },
+    {
+        id: "t3",
+        cardId: "c1",
+        merchant: "Uber",
+        amount: 24.50,
+        date: "2023-11-29T18:45:00Z",
+        category: "Transport",
+    },
+    {
+        id: "t4",
+        cardId: "c3",
+        merchant: "Whole Foods",
+        amount: 124.30,
+        date: "2023-11-28T17:20:00Z",
+        category: "Groceries",
+    },
+    {
+        id: "t5",
+        cardId: "c2",
+        merchant: "Netflix",
+        amount: 15.99,
+        date: "2023-11-27T09:00:00Z",
+        category: "Entertainment",
+    },
+];

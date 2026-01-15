@@ -1,0 +1,109 @@
+name: GCP Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        type: choice
+        description: "Which database to target"
+        options:
+          - dev
+          - prod
+        default: dev
+      create_sql_instance:
+        type: boolean
+        default: false
+        description: "Create Cloud SQL instance if missing"
+      create_sql_db:
+        type: boolean
+        default: false
+        description: "Create Cloud SQL database if missing"
+      create_sql_user:
+        type: boolean
+        default: false
+        description: "Create Cloud SQL user if missing"
+      run_prisma_migrate:
+        type: boolean
+        default: true
+        description: "Run Prisma migrations"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  SQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE }}
+  SQL_DB: ${{ vars.CLOUDSQL_DB }}
+  SQL_USER: ${{ vars.CLOUDSQL_USER }}
+  DATABASE_URL_DEV: ${{ secrets.DATABASE_URL_DEV }}
+  DATABASE_URL_PROD: ${{ secrets.DATABASE_URL_PROD }}
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.LOGITRACK_CLOUD_SQL_SA }}
+          service_account: ${{ vars.LOGITRACK_CLOUD_SQL_SA_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Create Cloud SQL instance
+        if: ${{ inputs.create_sql_instance }}
+        run: |
+          if ! gcloud sql instances describe "${SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+            gcloud sql instances create "${SQL_INSTANCE}" \
+              --project "${PROJECT_ID}" \
+              --database-version=POSTGRES_15 \
+              --region "${REGION}" \
+              --cpu=2 \
+              --memory=4GB
+          else
+            echo "Cloud SQL instance ${SQL_INSTANCE} already exists"
+          fi
+
+      - name: Create Cloud SQL database
+        if: ${{ inputs.create_sql_db }}
+        run: |
+          if ! gcloud sql databases describe "${SQL_DB}" --instance "${SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+            gcloud sql databases create "${SQL_DB}" --instance "${SQL_INSTANCE}" --project "${PROJECT_ID}"
+          else
+            echo "Database ${SQL_DB} already exists"
+          fi
+
+      - name: Create Cloud SQL user
+        if: ${{ inputs.create_sql_user }}
+        env:
+          SQL_PASSWORD: ${{ secrets.CLOUDSQL_PASSWORD }}
+        run: |
+          if [ -z "${SQL_PASSWORD}" ]; then
+            echo "CLOUDSQL_PASSWORD secret is required" >&2
+            exit 1
+          fi
+          if ! gcloud sql users list --instance "${SQL_INSTANCE}" --project "${PROJECT_ID}" --format="value(name)" | grep -q "^${SQL_USER}$"; then
+            gcloud sql users create "${SQL_USER}" --instance "${SQL_INSTANCE}" --project "${PROJECT_ID}" --password "${SQL_PASSWORD}"
+          else
+            echo "User ${SQL_USER} already exists"
+          fi
+
+      - name: Run Prisma migrations
+        if: ${{ inputs.run_prisma_migrate }}
+        env:
+          DATABASE_URL: ${{ inputs.target_env == 'prod' && env.DATABASE_URL_PROD || env.DATABASE_URL_DEV }}
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "DATABASE_URL_DEV or DATABASE_URL_PROD secret is required" >&2
+            exit 1
+          fi
+          cd backend
+          npm install
+          npx prisma generate
+          npx prisma migrate deploy
