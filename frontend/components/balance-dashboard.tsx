@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Download } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { getMonthToDateRange } from "@/lib/utils";
 
 type TransactionItem = {
     id: string;
@@ -63,9 +64,10 @@ interface BalanceDashboardProps {
 }
 
 export function BalanceDashboard({ cards, accounts, categories, initialTransactions }: BalanceDashboardProps) {
+    const monthToDate = useMemo(() => getMonthToDateRange(), []);
     const [activeTab, setActiveTab] = useState<"summary" | "cards" | "categories" | "loans" | "merchants">("summary");
-    const [dateFrom, setDateFrom] = useState<string>("");
-    const [dateTo, setDateTo] = useState<string>("");
+    const [dateFrom, setDateFrom] = useState<string>(monthToDate.from);
+    const [dateTo, setDateTo] = useState<string>(monthToDate.to);
     const [selectedCard, setSelectedCard] = useState<string>("");
     const [selectedAccount, setSelectedAccount] = useState<string>("");
     const [selectedSource, setSelectedSource] = useState<string>("");

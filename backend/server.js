@@ -467,6 +467,36 @@ app.post("/api/bank/accounts", async (req, res) => {
   }
 });
 
+app.put("/api/bank/accounts/:id", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const data = {};
+    if (typeof body.name === "string") data.name = body.name;
+    if (typeof body.type === "string") data.type = body.type;
+    if (typeof body.currency === "string") data.currency = body.currency;
+    if (typeof body.mask === "string") data.mask = body.mask;
+    if (typeof body.tags === "string") data.tags = body.tags;
+    const balance = parseAmount(body.balance);
+    const availableBalance = parseAmount(body.availableBalance);
+    const limit = parseAmount(body.limit);
+    if (balance !== null) data.balance = balance;
+    if (availableBalance !== null) data.availableBalance = availableBalance;
+    if (limit !== null) data.limit = limit;
+    if (!Object.keys(data).length) {
+      res.status(400).json({ error: "No fields to update" });
+      return;
+    }
+    const account = await prisma.bankAccount.update({
+      where: { id: req.params.id },
+      data,
+    });
+    res.json({ success: true, data: account });
+  } catch (error) {
+    console.error("Failed to update bank account:", error);
+    res.status(500).json({ error: "Failed to update bank account" });
+  }
+});
+
 app.get("/api/credentials/accounts", async (req, res) => {
   try {
     const bankAccountId = req.query.bankAccountId ? String(req.query.bankAccountId) : undefined;
@@ -963,7 +993,7 @@ async function ensureAccountId(connectionId, providerAccountId, type) {
   return created.id;
 }
 
-app.get("/api/sync-workbench/drafts", async (req, res) => {
+app.get("/api/transactions/drafts", async (req, res) => {
   try {
     const page = Number(req.query.page || "1");
     const pageSize = Number(req.query.pageSize || "15");
@@ -999,7 +1029,7 @@ app.get("/api/sync-workbench/drafts", async (req, res) => {
         orderBy: { date: "desc" },
         skip: page > 0 ? (page - 1) * pageSize : 0,
         take: pageSize,
-        include: { account: true },
+        include: { account: true, meta: true },
       }),
     ]);
 
@@ -1009,16 +1039,26 @@ app.get("/api/sync-workbench/drafts", async (req, res) => {
       meta: { total, page, pageSize },
     });
   } catch (error) {
-    console.error("sync-workbench drafts GET error", error);
+    console.error("transactions drafts GET error", error);
     res.status(500).json({ success: false, error: "Failed to load transactions" });
   }
 });
 
-app.post("/api/sync-workbench/drafts", async (req, res) => {
+app.post("/api/transactions/drafts", async (req, res) => {
   try {
     const body = req.body || {};
     const amount = typeof body.amount === "number" ? body.amount : Number(body.amount || 0);
     const bookingDate = body.date ? new Date(String(body.date)) : new Date();
+    const headAccount = typeof body.headAccount === "string" ? body.headAccount.trim() : "";
+    if (!headAccount) {
+      res.status(400).json({ success: false, error: "Head Account is required." });
+      return;
+    }
+    const attachments =
+      Array.isArray(body.attachments) ? body.attachments : typeof body.attachments === "string" ? body.attachments.split(",") : [];
+    const cleanedAttachments = attachments
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
     const created = await prisma.bankTransaction.create({
       data: {
         id: `manual-${Date.now()}`,
@@ -1041,16 +1081,30 @@ app.post("/api/sync-workbench/drafts", async (req, res) => {
         date: bookingDate,
         pending: false,
         raw: typeof body.raw === "string" ? body.raw : null,
+        meta: {
+          create: {
+            openingBalance: typeof body.openingBalance === "number" ? body.openingBalance : body.openingBalance ? Number(body.openingBalance) : null,
+            closingBalance: typeof body.closingBalance === "number" ? body.closingBalance : body.closingBalance ? Number(body.closingBalance) : null,
+            fromEntity: typeof body.fromEntity === "string" ? body.fromEntity : null,
+            viaEntity: typeof body.viaEntity === "string" ? body.viaEntity : null,
+            toEntity: typeof body.toEntity === "string" ? body.toEntity : null,
+            headAccount,
+            subCategory: typeof body.subCategory === "string" ? body.subCategory : null,
+            remarks: typeof body.remarks === "string" ? body.remarks : null,
+            comments: typeof body.comments === "string" ? body.comments : null,
+            attachmentsJson: cleanedAttachments.length ? JSON.stringify(cleanedAttachments) : null,
+          },
+        },
       },
     });
     res.json({ success: true, data: created });
   } catch (error) {
-    console.error("sync-workbench drafts POST error", error);
+    console.error("transactions drafts POST error", error);
     res.status(500).json({ success: false, error: "Failed to create transaction" });
   }
 });
 
-app.patch("/api/sync-workbench/drafts/:id", async (req, res) => {
+app.patch("/api/transactions/drafts/:id", async (req, res) => {
   try {
     const body = req.body || {};
     const data = {};
@@ -1063,7 +1117,6 @@ app.patch("/api/sync-workbench/drafts/:id", async (req, res) => {
     if (typeof body.descriptionVia === "string") data.descriptionVia = body.descriptionVia;
     if (typeof body.description === "string") data.descriptionVia = body.description;
     if (typeof body.direction === "string") data.direction = body.direction;
-    if (typeof body.raw === "string") data.raw = body.raw;
     if (body.date !== undefined) {
       const dateVal = typeof body.date === "string" ? new Date(body.date) : null;
       if (dateVal && Number.isNaN(dateVal.getTime())) {
@@ -1072,13 +1125,55 @@ app.patch("/api/sync-workbench/drafts/:id", async (req, res) => {
       }
       if (dateVal) data.date = dateVal;
     }
-    if (!Object.keys(data).length) {
+    const metaUpdate = {};
+    if (body.openingBalance !== undefined) {
+      const openingBalance = Number(body.openingBalance);
+      if (!Number.isNaN(openingBalance)) metaUpdate.openingBalance = openingBalance;
+    }
+    if (body.closingBalance !== undefined) {
+      const closingBalance = Number(body.closingBalance);
+      if (!Number.isNaN(closingBalance)) metaUpdate.closingBalance = closingBalance;
+    }
+    if (typeof body.fromEntity === "string") metaUpdate.fromEntity = body.fromEntity;
+    if (typeof body.viaEntity === "string") metaUpdate.viaEntity = body.viaEntity;
+    if (typeof body.toEntity === "string") metaUpdate.toEntity = body.toEntity;
+    if (typeof body.headAccount === "string") {
+      const headAccount = body.headAccount.trim();
+      if (!headAccount) {
+        res.status(400).json({ success: false, error: "Head Account is required." });
+        return;
+      }
+      metaUpdate.headAccount = headAccount;
+    }
+    if (typeof body.subCategory === "string") metaUpdate.subCategory = body.subCategory;
+    if (typeof body.remarks === "string") metaUpdate.remarks = body.remarks;
+    if (typeof body.comments === "string") metaUpdate.comments = body.comments;
+    if (body.attachments !== undefined) {
+      const attachments =
+        Array.isArray(body.attachments) ? body.attachments : typeof body.attachments === "string" ? body.attachments.split(",") : [];
+      const cleanedAttachments = attachments
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean);
+      metaUpdate.attachmentsJson = cleanedAttachments.length ? JSON.stringify(cleanedAttachments) : null;
+    }
+    if (!Object.keys(data).length && !Object.keys(metaUpdate).length) {
       res.status(400).json({ success: false, error: "No fields to update" });
       return;
     }
     const updated = await prisma.bankTransaction.update({
       where: { id: req.params.id },
-      data,
+      data: {
+        ...data,
+        meta: Object.keys(metaUpdate).length
+          ? {
+              upsert: {
+                create: metaUpdate,
+                update: metaUpdate,
+              },
+            }
+          : undefined,
+      },
+      include: { account: true, meta: true },
     });
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -1087,8 +1182,18 @@ app.patch("/api/sync-workbench/drafts/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/sync-workbench/drafts/:id", async (req, res) => {
+app.delete("/api/transactions/drafts/:id", async (req, res) => {
   try {
+    const existing = await prisma.bankTransaction.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      res.status(404).json({ success: false, error: "Transaction not found" });
+      return;
+    }
+    const isManual = typeof existing.providerTransactionId === "string" && existing.providerTransactionId.startsWith("manual-");
+    if (!isManual) {
+      res.status(403).json({ success: false, error: "Only cash transactions can be deleted." });
+      return;
+    }
     await prisma.bankTransaction.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (error) {
@@ -1097,7 +1202,7 @@ app.delete("/api/sync-workbench/drafts/:id", async (req, res) => {
   }
 });
 
-app.post("/api/sync-workbench/drafts/:id/approve", async (req, res) => {
+app.post("/api/transactions/drafts/:id/approve", async (req, res) => {
   try {
     const bankTx = await prisma.bankTransaction.findUnique({
       where: { id: req.params.id },
@@ -1138,7 +1243,7 @@ app.post("/api/sync-workbench/drafts/:id/approve", async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    console.error("sync-workbench approve error", error);
+    console.error("transactions approve error", error);
     res.status(500).json({ success: false, error: "Failed to approve transaction" });
   }
 });
@@ -1304,7 +1409,7 @@ app.delete("/api/transactions/:id", async (req, res) => {
 
 app.get("/api/analytics/spending-by-category", async (_req, res) => {
   try {
-    const transactions = await prisma.transaction.findMany({
+    const transactions = await prisma.bankTransaction.findMany({
       select: { category: true, amount: true },
     });
     const categoryTotals = transactions.reduce((acc, transaction) => {
@@ -1325,7 +1430,7 @@ app.get("/api/analytics/spending-by-category", async (_req, res) => {
 
 app.get("/api/analytics/monthly", async (_req, res) => {
   try {
-    const transactions = await prisma.transaction.findMany({
+    const transactions = await prisma.bankTransaction.findMany({
       select: { date: true, amount: true },
       orderBy: { date: "asc" },
     });
@@ -1350,14 +1455,14 @@ app.get("/api/analytics/monthly", async (_req, res) => {
 
 app.get("/api/analytics/by-card", async (_req, res) => {
   try {
-    const transactions = await prisma.transaction.findMany({
-      include: { card: true },
+    const transactions = await prisma.bankTransaction.findMany({
+      include: { account: true },
     });
     const cardTotals = transactions.reduce((acc, transaction) => {
-      if (transaction.card) {
-        const cardName = transaction.card.name || "Card";
-        acc[cardName] = (acc[cardName] || 0) + Math.abs(transaction.amount);
-      }
+      const name = transaction.account?.name || transaction.account?.type || "Account";
+      const helper = transaction.account?.mask ? ` (••${transaction.account.mask})` : "";
+      const label = `${name}${helper}`;
+      acc[label] = (acc[label] || 0) + Math.abs(transaction.amount);
       return acc;
     }, {});
     const data = Object.entries(cardTotals).map(([name, value]) => ({
@@ -1373,11 +1478,11 @@ app.get("/api/analytics/by-card", async (_req, res) => {
 
 app.get("/api/analytics/by-merchant", async (_req, res) => {
   try {
-    const transactions = await prisma.transaction.findMany({
-      select: { merchant: true, description: true, amount: true },
+    const transactions = await prisma.bankTransaction.findMany({
+      select: { merchant: true, descriptionVia: true, amount: true },
     });
     const merchantTotals = transactions.reduce((acc, transaction) => {
-      const key = transaction.merchant || transaction.description || "Unknown";
+      const key = transaction.merchant || transaction.descriptionVia || "Unknown";
       acc[key] = (acc[key] || 0) + Math.abs(transaction.amount);
       return acc;
     }, {});
@@ -1396,7 +1501,7 @@ app.get("/api/insights", async (_req, res) => {
   try {
     const insights = [];
     const cards = await prisma.card.findMany();
-    const transactions = await prisma.transaction.findMany({
+    const transactions = await prisma.bankTransaction.findMany({
       where: {
         date: {
           gte: new Date(new Date().setMonth(new Date().getMonth() - 1)),
@@ -1439,7 +1544,9 @@ app.get("/api/insights", async (_req, res) => {
     }
 
     const categoryTotals = transactions.reduce((acc, transaction) => {
-      acc[transaction.category] = (acc[transaction.category] || 0) + transaction.amount;
+      const key = transaction.category || "Uncategorized";
+      const amount = transaction.amount < 0 ? Math.abs(transaction.amount) : transaction.amount;
+      acc[key] = (acc[key] || 0) + amount;
       return acc;
     }, {});
 
@@ -1465,9 +1572,9 @@ app.get("/api/insights", async (_req, res) => {
 
     const currentMonthSpending = transactions
       .filter((t) => new Date(t.date) >= currentMonth)
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
-    const lastMonthTransactions = await prisma.transaction.findMany({
+    const lastMonthTransactions = await prisma.bankTransaction.findMany({
       where: {
         date: {
           gte: lastMonth,
@@ -1476,7 +1583,7 @@ app.get("/api/insights", async (_req, res) => {
       },
     });
 
-    const lastMonthSpending = lastMonthTransactions.reduce((sum, t) => sum + t.amount, 0);
+    const lastMonthSpending = lastMonthTransactions.reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
     if (lastMonthSpending > 0) {
       const change = ((currentMonthSpending - lastMonthSpending) / lastMonthSpending) * 100;

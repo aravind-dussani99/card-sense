@@ -2,7 +2,6 @@ import { Metadata } from "next";
 import { MainNav } from "@/components/main-nav";
 import { EmailSendersList } from "@/components/email-senders-list";
 import { getOffersBySender } from "@/app/actions/offer-actions";
-import { FloatingAddButton } from "@/components/floating-add-button";
 import { getCards } from "@/app/actions/card-actions";
 import { getCategories } from "@/app/actions/category-actions";
 
@@ -35,8 +34,6 @@ export default async function EmailSendersPage() {
                 </div>
                 <EmailSendersList initialStats={senderStats} />
             </div>
-            <FloatingAddButton cards={cards} categories={categories} />
         </div>
     );
 }
-

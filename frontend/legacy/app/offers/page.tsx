@@ -5,7 +5,6 @@ import { getAllOffers } from "@/app/actions/offer-actions";
 import { getCards } from "@/app/actions/card-actions";
 import { getCategories } from "@/app/actions/category-actions";
 import { prisma } from "@/lib/prisma";
-import { FloatingAddButton } from "@/components/floating-add-button";
 import { getProcessingHistory } from "@/app/actions/email-processor-actions";
 import { EmailRetriever } from "@/components/email-retriever";
 import { matchOffers } from "@/lib/offers-matcher";
@@ -97,7 +96,6 @@ export default async function OffersPage() {
                 )}
                 <OffersList initialOffers={offers} cards={cards} />
             </div>
-            <FloatingAddButton cards={cards} categories={categories} />
         </div>
     );
 }

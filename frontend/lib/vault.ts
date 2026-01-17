@@ -1,5 +1,6 @@
 const VAULT_DATA_KEY = "cardsense.vault.data";
 const VAULT_SALT_KEY = "cardsense.vault.salt";
+const PASSPHRASE_CHECK_KEY = "cardsense.vault.passphrase-check";
 
 function bufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
@@ -112,6 +113,30 @@ export async function decryptPayload(passphrase: string, payloadRaw: string) {
   const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encrypted);
   const json = new TextDecoder().decode(decrypted);
   return JSON.parse(json);
+}
+
+export function passphraseMarkerExists() {
+  return Boolean(localStorage.getItem(PASSPHRASE_CHECK_KEY));
+}
+
+export async function setPassphraseMarker(passphrase: string) {
+  const marker = await encryptPayload(passphrase, { ok: true, createdAt: new Date().toISOString() });
+  localStorage.setItem(PASSPHRASE_CHECK_KEY, marker);
+}
+
+export async function verifyPassphrase(passphrase: string) {
+  const marker = localStorage.getItem(PASSPHRASE_CHECK_KEY);
+  if (!marker) return false;
+  try {
+    const decoded = await decryptPayload(passphrase, marker);
+    return Boolean(decoded?.ok);
+  } catch {
+    return false;
+  }
+}
+
+export function clearPassphraseMarker() {
+  localStorage.removeItem(PASSPHRASE_CHECK_KEY);
 }
 
 export function vaultExists() {

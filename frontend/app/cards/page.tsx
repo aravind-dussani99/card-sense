@@ -5,7 +5,6 @@ import { AddAccountDialog } from "@/components/add-account-dialog"
 import { EditCardDialog } from "@/components/edit-card-dialog"
 import { CardDisplay } from "@/components/card-display"
 import { BankAccountsList } from "@/components/bank-accounts-list"
-import { FloatingAddButton } from "@/components/floating-add-button"
 import { getCards } from "@/app/actions/card-actions"
 import { CreditCard as CardIcon } from "lucide-react"
 import { getCategories } from "@/app/actions/category-actions"
@@ -44,7 +43,7 @@ export default async function CardsPage() {
                 </div>
                 <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
                     {cards.map((card) => (
-                        <div key={card.id} className="relative">
+                        <div key={card.id} className="relative max-w-sm w-full mx-auto">
                             <div className="absolute left-3 top-3 text-gray-500">
                                 <CardIcon className="h-4 w-4" />
                             </div>
@@ -69,7 +68,6 @@ export default async function CardsPage() {
                     )}
                 </div>
             </div>
-            <FloatingAddButton cards={cards} categories={categories} />
         </div>
     )
 }

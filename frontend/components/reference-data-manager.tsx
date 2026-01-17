@@ -403,28 +403,38 @@ export function ReferenceDataManager() {
                                                                     }
                                                                 }}
                                                             />
-                                                            <button onClick={() => setEditingSub(null)} className="text-muted-foreground" aria-label="Cancel rename">
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-4 w-4"
+                                                                onClick={() => setEditingSub(null)}
+                                                                aria-label="Cancel rename"
+                                                            >
                                                                 ✕
-                                                            </button>
+                                                            </Button>
                                                         </>
                                                     ) : (
                                                         <>
                                                             {sub.name}
-                                                            <button
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-4 w-4"
                                                                 onClick={() => setEditingSub({ id: sub.id, name: sub.name })}
-                                                                className="text-muted-foreground hover:text-foreground"
                                                                 aria-label="Rename sub-category"
                                                             >
                                                                 ✎
-                                                            </button>
+                                                            </Button>
                                                         </>
                                                     )}
-                                                    <button
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-4 w-4 text-destructive hover:text-destructive/80"
                                                         onClick={() => handleDeleteSubCategory(sub.id)}
-                                                        className="text-destructive hover:text-destructive/80"
                                                     >
                                                         <Trash2 className="h-2.5 w-2.5" />
-                                                    </button>
+                                                    </Button>
                                                 </span>
                                             ))}
                                         </div>

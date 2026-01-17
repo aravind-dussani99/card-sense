@@ -4,7 +4,6 @@ import { DraftTransactionsList } from "@/components/draft-transactions-list";
 import { getPendingDraftTransactions } from "@/app/actions/draft-transaction-actions";
 import { getCards } from "@/app/actions/card-actions";
 import { getCategories } from "@/app/actions/category-actions";
-import { FloatingAddButton } from "@/components/floating-add-button";
 import { getProcessingHistory } from "@/app/actions/email-processor-actions";
 import { EmailRetriever } from "@/components/email-retriever";
 import { prisma } from "@/lib/prisma";
@@ -84,7 +83,6 @@ export default async function DraftsPage({ searchParams }: { searchParams: Promi
                     pageSize={pageSize}
                 />
             </div>
-            <FloatingAddButton cards={cards} categories={categories} />
         </div>
     );
 }

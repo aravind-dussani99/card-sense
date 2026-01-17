@@ -1,6 +1,5 @@
 import { Metadata } from "next"
 import { MainNav } from "@/components/main-nav"
-import { FloatingAddButton } from "@/components/floating-add-button"
 import { getCards } from "@/app/actions/card-actions"
 import { getCategories } from "@/app/actions/category-actions"
 import { getSpendingByCategory, getMonthlySpending, getSpendingByCard, getSpendingByMerchant } from "@/app/actions/analytics-actions"
@@ -38,7 +37,6 @@ export default async function AnalyticsPage() {
                     merchantData={merchantData}
                 />
             </div>
-            <FloatingAddButton cards={cards} categories={categories} />
         </div>
     )
 }

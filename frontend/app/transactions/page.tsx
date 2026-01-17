@@ -3,7 +3,7 @@ import { MainNav } from "@/components/main-nav";
 import { TransactionsList } from "@/components/transactions-list";
 import { getCards } from "@/app/actions/card-actions";
 import { getCategories } from "@/app/actions/category-actions";
-import { getTransactions } from "@/app/actions/transaction-actions";
+import { getBankAccounts } from "@/app/actions/bank-actions";
 
 export const metadata: Metadata = {
     title: "Transactions - CardSense",
@@ -11,10 +11,10 @@ export const metadata: Metadata = {
 }
 
 export default async function TransactionsPage() {
-    const [cards, transactions, categories] = await Promise.all([
+    const [cards, categories, accounts] = await Promise.all([
         getCards(),
-        getTransactions({ limit: 200 }),
         getCategories(),
+        getBankAccounts(),
     ]);
 
     return (
@@ -28,19 +28,20 @@ export default async function TransactionsPage() {
             <div className="mx-auto w-full max-w-7xl px-6 py-10 flex-1">
                 <div className="flex items-center justify-between mb-6">
                     <div>
-                        <p className="text-sm font-semibold text-indigo-500 tracking-wider uppercase">Transactions</p>
                         <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">All transactions</h1>
                         <p className="mt-1 text-base text-slate-600">
-                            Sync, filter, review, and add cash transactions from one place.
+                            Sync OpenBanking Transactions, filter, review, update and add cash transactions from one place.
                         </p>
                     </div>
                 </div>
 
-                <TransactionsList
-                    initialTransactions={transactions}
-                    cards={cards}
-                    categories={categories}
-                />
+                <div className="space-y-10">
+                    <TransactionsList
+                        cards={cards}
+                        categories={categories}
+                        accounts={accounts}
+                    />
+                </div>
             </div>
         </div>
     );

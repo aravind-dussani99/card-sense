@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Eye, Pencil, Trash2, AlertCircle, CheckCircle2, Check } from "lucide-react";
+import { RefreshCw, AlertCircle, CheckCircle2, Eye, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
     Dialog,
     DialogContent,
@@ -20,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { getApiBaseUrl } from "@/lib/api";
+import { getMonthToDateRange } from "@/lib/utils";
 
 type SourceOption = {
     id: string;
@@ -32,16 +32,38 @@ type DraftRecord = {
     id: string;
     merchantTo?: string | null;
     descriptionVia?: string | null;
+    merchant?: string | null;
     subCategory?: string | null;
     amount: number;
     currency?: string | null;
     category?: string | null;
     date: string | null;
-    notes?: string | null;
     remarks?: string | null;
     raw?: string | null;
     direction?: string | null;
+    providerTransactionId?: string | null;
+    runningBalance?: number | null;
+    openingBalance?: number | null;
+    closingBalance?: number | null;
+    fromEntity?: string | null;
+    viaEntity?: string | null;
+    toEntity?: string | null;
+    headAccount?: string | null;
+    attachments?: string[];
+    comments?: string | null;
     account?: { id: string; name: string | null; type: string | null; mask: string | null } | null;
+    meta?: {
+        openingBalance?: number | null;
+        closingBalance?: number | null;
+        fromEntity?: string | null;
+        viaEntity?: string | null;
+        toEntity?: string | null;
+        headAccount?: string | null;
+        subCategory?: string | null;
+        remarks?: string | null;
+        comments?: string | null;
+        attachmentsJson?: string | null;
+    } | null;
 };
 
 type Meta = {
@@ -55,7 +77,7 @@ type DialogState = {
     draft?: DraftRecord;
 };
 
-interface SyncWorkbenchProps {
+interface TransactionsWorkbenchProps {
     accounts: SourceOption[];
     cards: SourceOption[];
     initialDrafts: DraftRecord[];
@@ -77,12 +99,13 @@ const SYNC_MODES = [
 const PAGE_SIZE = 15;
 type SyncModeOption = (typeof SYNC_MODES)[number]["value"];
 
-export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, categories }: SyncWorkbenchProps) {
+export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialMeta, categories }: TransactionsWorkbenchProps) {
+    const monthToDate = useMemo(() => getMonthToDateRange(), []);
     const [syncMode, setSyncMode] = useState<SyncModeOption>("all");
     const [selectedSources, setSelectedSources] = useState<string[]>([]);
     const allSources = useMemo(() => [...accounts, ...cards], [accounts, cards]);
-    const [fromDate, setFromDate] = useState("");
-    const [toDate, setToDate] = useState("");
+    const [fromDate, setFromDate] = useState(monthToDate.from);
+    const [toDate, setToDate] = useState(monthToDate.to);
     const [syncLoading, setSyncLoading] = useState(false);
     const [pageLoading, setPageLoading] = useState(false);
     const [drafts, setDrafts] = useState<DraftRecord[]>(initialDrafts);
@@ -95,18 +118,25 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
         category: "",
         categoryId: "",
         subCategory: "",
+        headAccount: "",
+        openingBalance: "",
+        closingBalance: "",
+        fromEntity: "",
+        viaEntity: "",
+        toEntity: "",
+        attachments: "",
         description: "",
-        bookingDate: "",
-        notes: "",
         remarks: "",
+        comments: "",
+        bookingDate: "",
     });
     const [editLoading, setEditLoading] = useState(false);
     const [rowLoadingId, setRowLoadingId] = useState<string | null>(null);
     const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
     const [filterAccountId, setFilterAccountId] = useState<string>("");
     const [filterCategoryId, setFilterCategoryId] = useState<string>("");
-    const [filterFromDate, setFilterFromDate] = useState<string>("");
-    const [filterToDate, setFilterToDate] = useState<string>("");
+    const [filterFromDate, setFilterFromDate] = useState<string>(monthToDate.from);
+    const [filterToDate, setFilterToDate] = useState<string>(monthToDate.to);
     const [showSync, setShowSync] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
 
@@ -119,12 +149,82 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
         }
     }, [syncMode, selectedSources.length]);
 
+
+    const buildAccountLabel = (item: DraftRecord) => {
+        const name = item.account?.name || item.account?.type || "Account";
+        const helper = item.account?.mask ? `••${item.account.mask}` : item.account?.type || "";
+        return `${name}${helper ? ` (${helper})` : ""}`;
+    };
+
+    const mapDraftFromApi = (draft: DraftRecord): DraftRecord => {
+        let extra: { remarks?: string | null; subCategory?: string | null } = {};
+        if (draft.raw) {
+            try {
+                const parsed = JSON.parse(draft.raw);
+                if (parsed && typeof parsed === "object") {
+                    extra = {
+                        remarks: typeof parsed.remarks === "string" ? parsed.remarks : undefined,
+                        subCategory: typeof parsed.subCategory === "string" ? parsed.subCategory : undefined,
+                    };
+                }
+            } catch {
+                // ignore malformed raw
+            }
+        }
+        let attachments: string[] = [];
+        if (draft.meta?.attachmentsJson) {
+            try {
+                const parsed = JSON.parse(draft.meta.attachmentsJson);
+                attachments = Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+            } catch {
+                attachments = [];
+            }
+        }
+        const sourceLabel = buildAccountLabel(draft);
+        const merchantLabel = draft.merchant || draft.merchantTo || draft.descriptionVia || null;
+        const isOutflow = draft.amount < 0;
+        const derivedFrom = isOutflow ? sourceLabel : merchantLabel || sourceLabel;
+        const derivedTo = isOutflow ? merchantLabel || sourceLabel : sourceLabel;
+        const closingBalance =
+            draft.meta?.closingBalance ??
+            (draft.runningBalance !== undefined && draft.runningBalance !== null ? draft.runningBalance : null);
+        const openingBalance =
+            draft.meta?.openingBalance ??
+            (closingBalance !== null && closingBalance !== undefined ? closingBalance - draft.amount : null);
+        return {
+            ...draft,
+            date: draft.date,
+            merchantTo: draft.merchantTo || (draft as any).merchant || draft.descriptionVia || null,
+            descriptionVia: draft.descriptionVia || (draft as any).description || (draft as any).merchant || null,
+            remarks: draft.meta?.remarks ?? draft.remarks ?? extra.remarks ?? null,
+            subCategory: draft.meta?.subCategory ?? draft.subCategory ?? extra.subCategory ?? null,
+            direction: draft.direction || (draft.amount < 0 ? "debit" : "credit"),
+            openingBalance,
+            closingBalance,
+            fromEntity: draft.meta?.fromEntity ?? derivedFrom ?? null,
+            viaEntity: draft.meta?.viaEntity ?? null,
+            toEntity: draft.meta?.toEntity ?? derivedTo ?? null,
+            headAccount: draft.meta?.headAccount ?? null,
+            attachments,
+            comments: draft.meta?.comments ?? null,
+        };
+    };
+
+    useEffect(() => {
+        setDrafts(initialDrafts.map(mapDraftFromApi));
+        setMeta(initialMeta);
+    }, [initialDrafts, initialMeta]);
+
+    useEffect(() => {
+        void fetchDrafts(1, PAGE_SIZE);
+    }, []);
+
     const totalPages = Math.max(1, Math.ceil(meta.total / meta.pageSize));
 
     const renderPageButtons = () => {
-        const maxButtons = 7;
+        const maxButtons = 5;
         const buttons: JSX.Element[] = [];
-        let start = Math.max(1, meta.page - 3);
+        let start = Math.max(1, meta.page - 2);
         let end = Math.min(totalPages, start + maxButtons - 1);
         if (end - start < maxButtons - 1) {
             start = Math.max(1, end - maxButtons + 1);
@@ -164,39 +264,6 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
 
         return buttons;
     };
-
-    const mapDraftFromApi = (draft: DraftRecord): DraftRecord => {
-        let extra: { notes?: string | null; remarks?: string | null; subCategory?: string | null } = {};
-        if (draft.raw) {
-            try {
-                const parsed = JSON.parse(draft.raw);
-                if (parsed && typeof parsed === "object") {
-                    extra = {
-                        notes: typeof parsed.notes === "string" ? parsed.notes : undefined,
-                        remarks: typeof parsed.remarks === "string" ? parsed.remarks : undefined,
-                        subCategory: typeof parsed.subCategory === "string" ? parsed.subCategory : undefined,
-                    };
-                }
-            } catch {
-                // ignore malformed raw
-            }
-        }
-        return {
-            ...draft,
-            date: draft.date,
-            merchantTo: draft.merchantTo || (draft as any).merchant || draft.descriptionVia || null,
-            descriptionVia: draft.descriptionVia || (draft as any).description || (draft as any).merchant || null,
-            notes: draft.notes ?? extra.notes ?? null,
-            remarks: draft.remarks ?? extra.remarks ?? null,
-            subCategory: draft.subCategory ?? extra.subCategory ?? null,
-            direction: draft.direction || (draft.amount < 0 ? "debit" : "credit"),
-        };
-    };
-
-    useEffect(() => {
-        setDrafts(initialDrafts.map(mapDraftFromApi));
-        setMeta(initialMeta);
-    }, [initialDrafts, initialMeta]);
 
     type DraftListResponse = {
         success: boolean;
@@ -259,7 +326,7 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
             if (catValue) params.set("categoryId", catValue);
             if (fromDateValue) params.set("fromDate", fromDateValue);
             if (toDateValue) params.set("toDate", toDateValue);
-            const response = await fetch(`${getApiBaseUrl()}/api/sync-workbench/drafts?${params.toString()}`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/transactions/drafts?${params.toString()}`, {
                 cache: "no-store",
             });
             const data = await readJson<DraftListResponse>(response);
@@ -281,12 +348,22 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
     };
 
     const resetFilters = () => {
+        const range = getMonthToDateRange();
         setFilterAccountId("");
         setFilterCategoryId("");
-        setFilterFromDate("");
-        setFilterToDate("");
+        setFilterFromDate(range.from);
+        setFilterToDate(range.to);
         setSearchTerm("");
-        void fetchDrafts(1, PAGE_SIZE, "", "", "", "");
+        void fetchDrafts(1, PAGE_SIZE, "", "", "", range.from, range.to);
+    };
+
+    const resetSyncConfig = () => {
+        const range = getMonthToDateRange();
+        setSyncMode("all");
+        setSelectedSources([]);
+        setFromDate(range.from);
+        setToDate(range.to);
+        setSourcePickerOpen(false);
     };
 
     const handleSync = async () => {
@@ -335,13 +412,11 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
         setRowLoadingId(id);
         setFeedback(null);
         try {
-            const response = await fetch(`${getApiBaseUrl()}/api/sync-workbench/drafts/${id}`, { method: "DELETE" });
+            const response = await fetch(`${getApiBaseUrl()}/api/transactions/drafts/${id}`, { method: "DELETE" });
             const data = await readJson<{ success: boolean; error?: string }>(response);
             if (!response.ok || !data.success) throw new Error(data.error || "Delete failed");
-            const nextTotal = Math.max(0, meta.total - 1);
-            const nextPage = Math.min(meta.page, Math.max(1, Math.ceil(nextTotal / meta.pageSize)));
-            await fetchDrafts(nextPage);
-            setFeedback({ type: "success", message: "Transaction removed. It will reappear on the next sync if still present at source." });
+            await fetchDrafts(1);
+            setFeedback({ type: "success", message: "Cash transaction deleted." });
         } catch (error: unknown) {
             setFeedback({ type: "error", message: getErrorMessage(error) || "Delete failed" });
         } finally {
@@ -349,23 +424,6 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
         }
     };
 
-    const handleApprove = async (id: string) => {
-        setRowLoadingId(id);
-        setFeedback(null);
-        try {
-            const response = await fetch(`${getApiBaseUrl()}/api/sync-workbench/drafts/${id}/approve`, {
-                method: "POST",
-            });
-            const data = await readJson<{ success: boolean; error?: string }>(response);
-            if (!response.ok || !data.success) throw new Error(data.error || "Approve failed");
-            await fetchDrafts(meta.page);
-            setFeedback({ type: "success", message: "Transaction approved and saved to ledger." });
-        } catch (error: unknown) {
-            setFeedback({ type: "error", message: getErrorMessage(error) || "Approve failed" });
-        } finally {
-            setRowLoadingId(null);
-        }
-    };
 
     const openDialog = (mode: "view" | "edit" | "add", draft?: DraftRecord) => {
         setDialog({ mode, draft });
@@ -378,10 +436,17 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                 category: matchedCategory?.name || "",
                 categoryId: matchedCategory?.id || "",
                 subCategory: draft.subCategory || "",
+                headAccount: draft.headAccount || "",
+                openingBalance: draft.openingBalance !== null && draft.openingBalance !== undefined ? String(draft.openingBalance) : "",
+                closingBalance: draft.closingBalance !== null && draft.closingBalance !== undefined ? String(draft.closingBalance) : "",
+                fromEntity: draft.fromEntity || "",
+                viaEntity: draft.viaEntity || "",
+                toEntity: draft.toEntity || "",
+                attachments: draft.attachments?.join(", ") || "",
                 description: draft.descriptionVia || draft.merchantTo || "",
-                bookingDate: draft.date ? draft.date.substring(0, 10) : "",
-                notes: draft.notes || "",
                 remarks: draft.remarks || "",
+                comments: draft.comments || "",
+                bookingDate: draft.date ? draft.date.substring(0, 10) : "",
             });
         }
         if (mode === "add") {
@@ -391,10 +456,17 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                 category: "",
                 categoryId: "",
                 subCategory: "",
+                headAccount: "",
+                openingBalance: "",
+                closingBalance: "",
+                fromEntity: "",
+                viaEntity: "",
+                toEntity: "",
+                attachments: "",
                 description: "",
-                bookingDate: "",
-                notes: "",
                 remarks: "",
+                comments: "",
+                bookingDate: "",
             });
         }
     };
@@ -407,10 +479,17 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
             category: "",
             categoryId: "",
             subCategory: "",
+            headAccount: "",
+            openingBalance: "",
+            closingBalance: "",
+            fromEntity: "",
+            viaEntity: "",
+            toEntity: "",
+            attachments: "",
             description: "",
-            bookingDate: "",
-            notes: "",
             remarks: "",
+            comments: "",
+            bookingDate: "",
         });
         setEditLoading(false);
     };
@@ -437,16 +516,12 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
         setEditForm((prev) => ({ ...prev, subCategory: value }));
     };
 
-    const buildRawPayload = (subCategory?: string, notes?: string, remarks?: string) => {
-        const payload: Record<string, string> = {};
-        if (subCategory) payload.subCategory = subCategory;
-        if (notes) payload.notes = notes;
-        if (remarks) payload.remarks = remarks;
-        return Object.keys(payload).length ? JSON.stringify(payload) : null;
-    };
-
     const submitEdit = async () => {
         if (!dialog.draft) return;
+        if (!editForm.headAccount.trim()) {
+            setFeedback({ type: "error", message: "Head Account is required." });
+            return;
+        }
         setEditLoading(true);
         setFeedback(null);
         try {
@@ -456,9 +531,18 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                 amount: editForm.amount ? Number(editForm.amount) : undefined,
                 category: categoryName || undefined,
                 descriptionVia: editForm.description || editForm.merchantName || undefined,
-                raw: buildRawPayload(editForm.subCategory, editForm.notes, editForm.remarks),
+                subCategory: editForm.subCategory || undefined,
+                headAccount: editForm.headAccount || undefined,
+                openingBalance: editForm.openingBalance ? Number(editForm.openingBalance) : undefined,
+                closingBalance: editForm.closingBalance ? Number(editForm.closingBalance) : undefined,
+                fromEntity: editForm.fromEntity || undefined,
+                viaEntity: editForm.viaEntity || undefined,
+                toEntity: editForm.toEntity || undefined,
+                remarks: editForm.remarks || undefined,
+                comments: editForm.comments || undefined,
+                attachments: editForm.attachments || undefined,
             };
-            const response = await fetch(`${getApiBaseUrl()}/api/sync-workbench/drafts/${dialog.draft.id}`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/transactions/drafts/${dialog.draft.id}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
@@ -475,6 +559,10 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
     };
 
     const submitAdd = async () => {
+        if (!editForm.headAccount.trim()) {
+            setFeedback({ type: "error", message: "Head Account is required." });
+            return;
+        }
         setEditLoading(true);
         setFeedback(null);
         try {
@@ -485,9 +573,18 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                 category: categoryName || null,
                 descriptionVia: editForm.description || editForm.merchantName || null,
                 date: editForm.bookingDate || new Date().toISOString().substring(0, 10),
-                raw: buildRawPayload(editForm.subCategory || undefined, editForm.notes || undefined, editForm.remarks || undefined),
+                subCategory: editForm.subCategory || null,
+                headAccount: editForm.headAccount || null,
+                openingBalance: editForm.openingBalance ? Number(editForm.openingBalance) : null,
+                closingBalance: editForm.closingBalance ? Number(editForm.closingBalance) : null,
+                fromEntity: editForm.fromEntity || null,
+                viaEntity: editForm.viaEntity || null,
+                toEntity: editForm.toEntity || null,
+                remarks: editForm.remarks || null,
+                comments: editForm.comments || null,
+                attachments: editForm.attachments || null,
             };
-            const response = await fetch(`${getApiBaseUrl()}/api/sync-workbench/drafts`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/transactions/drafts`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
@@ -529,11 +626,10 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
         }).format(date);
     };
 
-    const renderSourceLabel = (draft: DraftRecord) => {
-        const name = draft.account?.name || draft.account?.type || "Account";
-        const helperAcct = draft.account?.mask ? `••${draft.account.mask}` : draft.account?.type || "";
-        return `${name}${helperAcct ? ` (${helperAcct})` : ""}`;
-    };
+    const renderSourceLabel = (draft: DraftRecord) => buildAccountLabel(draft);
+
+    const isCashTransaction = (draft: DraftRecord) =>
+        typeof draft.providerTransactionId === "string" && draft.providerTransactionId.startsWith("manual-");
 
     return (
         <div className="space-y-6">
@@ -543,7 +639,7 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                         <CardTitle>Sync configuration</CardTitle>
                         <CardDescription>Choose sources and date boundaries. Each sync writes into the new transactions store.</CardDescription>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => setShowSync((prev) => !prev)}>
+                    <Button variant="outline" size="sm" onClick={() => setShowSync((prev) => !prev)}>
                         {showSync ? "Hide sync" : "Show sync"}
                     </Button>
                 </CardHeader>
@@ -615,13 +711,9 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                                             )}
                                         </div>
                                         <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                            <button
-                                                type="button"
-                                                className="font-medium hover:text-slate-900"
-                                                onClick={() => setSelectedSources([])}
-                                            >
+                                            <Button type="button" size="sm" variant="outline" onClick={() => setSelectedSources([])}>
                                                 Clear selection
-                                            </button>
+                                            </Button>
                                             <Button type="button" size="sm" onClick={() => setSourcePickerOpen(false)}>
                                                 Done
                                             </Button>
@@ -641,10 +733,10 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                         <div className="flex flex-wrap items-center gap-2">
                             <Button onClick={handleSync} disabled={syncLoading}>
                                 {syncLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                                Sync from bank
+                                Sync from OpenBanking
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => { setFromDate(""); setToDate(""); }}>
-                                Clear dates
+                            <Button variant="outline" size="sm" onClick={resetSyncConfig}>
+                                Reset
                             </Button>
                         </div>
                         {feedback && feedback.type === "success" && (
@@ -673,20 +765,6 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                 <CardContent className="space-y-3">
                     <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
                         <div className="space-y-1.5">
-                            <Label>Search keyword</Label>
-                            <Input
-                                placeholder="Merchant or description..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        applyFilters();
-                                    }
-                                }}
-                            />
-                        </div>
-                        <div className="space-y-1.5">
                             <Label>Accounts / Cards</Label>
                             <Select
                                 value={filterAccountId || "all"}
@@ -704,6 +782,27 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                                     ))}
                                 </SelectContent>
                             </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label>Date range</Label>
+                            <div className="grid grid-cols-2 gap-2">
+                                <Input type="date" value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} />
+                                <Input type="date" value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} />
+                            </div>
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label>Search keyword</Label>
+                            <Input
+                                placeholder="Merchant or description..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        applyFilters();
+                                    }
+                                }}
+                            />
                         </div>
                         <div className="space-y-1.5">
                             <Label>Category</Label>
@@ -730,142 +829,27 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="space-y-1.5">
-                            <Label>Date range</Label>
-                            <div className="grid grid-cols-2 gap-2">
-                                <Input type="date" value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} />
-                                <Input type="date" value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} />
-                            </div>
-                        </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
                         <Button onClick={applyFilters}>Filter</Button>
-                        <Button variant="ghost" onClick={resetFilters}>Reset</Button>
+                        <Button variant="outline" onClick={resetFilters}>Reset</Button>
                     </div>
                 </CardContent>
             </Card>
 
             <Card>
-                <CardHeader className="pb-4">
+                <CardHeader className="pb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex flex-col gap-1">
                         <CardTitle>Transactions</CardTitle>
-                        <CardDescription>Everything fetched via the sync button lands here. Review 15 rows at a time.</CardDescription>
+                        <CardDescription>
+                            Everything fetched via the sync button lands here. Review 15 rows at a time. Edit or review synced items. Deleting is allowed only for cash entries.
+                        </CardDescription>
                     </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex flex-col">
-                            <CardTitle className="text-lg">Transactions</CardTitle>
-                            <CardDescription>Edit or review synced items. Deleting is allowed only for cash entries.</CardDescription>
-                        </div>
+                    <div className="flex flex-col items-end gap-3">
                         <Button size="sm" onClick={() => openDialog("add")}>
-                            + Add transaction
+                            + Add Cash Transaction
                         </Button>
-                    </div>
-
-                    <div className="rounded-md border overflow-hidden">
-                        <div className="relative max-h-[640px] overflow-auto">
-                        <Table className="text-sm">
-                            <TableHeader className="sticky top-0 z-20 bg-white shadow-sm">
-                                <TableRow>
-                                    <TableHead className="sticky top-0 bg-white z-20">Source</TableHead>
-                                    <TableHead className="sticky top-0 bg-white z-20">Merchant</TableHead>
-                                    <TableHead className="sticky top-0 bg-white z-20">Type</TableHead>
-                                    <TableHead className="sticky top-0 bg-white z-20">Category</TableHead>
-                                    <TableHead className="sticky top-0 bg-white z-20">Amount</TableHead>
-                                    <TableHead className="sticky top-0 bg-white z-20">Date</TableHead>
-                                    <TableHead className="sticky top-0 bg-white z-20 text-right">Actions</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {drafts.length === 0 && (
-                                    <TableRow>
-                                        <TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-10">
-                                            {pageLoading ? "Loading transactions..." : "No transactions yet. Run a sync to populate this table."}
-                                        </TableCell>
-                                    </TableRow>
-                                )}
-                                {drafts.map((draft) => (
-                                    <TableRow key={draft.id} className="align-middle">
-                                        <TableCell className="py-2">
-                                            <div className="flex flex-col">
-                                                <span className="font-medium">{renderSourceLabel(draft)}</span>
-                                                <span className="text-xs text-muted-foreground capitalize">{draft.account?.type || "account"}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="py-2">
-                                            <div className="flex flex-col">
-                                                <span className="font-medium">{draft.merchantTo || draft.descriptionVia || "—"}</span>
-                                                <span className="text-xs text-muted-foreground">
-                                                    {draft.descriptionVia || draft.merchantTo || "No description"}
-                                                </span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="py-2">
-                                            <span className="text-xs font-medium uppercase text-muted-foreground">
-                                                {draft.amount < 0 ? "Debit" : "Credit"}
-                                            </span>
-                                        </TableCell>
-                                        <TableCell className="py-2">
-                                            <div className="flex flex-col gap-1">
-                                                <span>{draft.category || "—"}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="font-semibold py-2">
-                                            {formatCurrency(draft.amount, draft.currency || "USD")}
-                                        </TableCell>
-                                        <TableCell className="py-2">
-                                            <div className="flex flex-col">
-                                                <span>{formatDate(draft.date)}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="text-right space-x-1 py-2">
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                disabled={rowLoadingId === draft.id}
-                                                onClick={() => handleApprove(draft.id)}
-                                                title="Approve"
-                                            >
-                                                {rowLoadingId === draft.id ? (
-                                                    <RefreshCw className="h-4 w-4 animate-spin" />
-                                                ) : (
-                                                    <Check className="h-4 w-4" />
-                                                )}
-                                            </Button>
-                                            <Button variant="ghost" size="icon" onClick={() => openDialog("view", draft)}>
-                                                <Eye className="h-4 w-4" />
-                                            </Button>
-                                            <Button variant="ghost" size="icon" onClick={() => openDialog("edit", draft)}>
-                                                <Pencil className="h-4 w-4" />
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                disabled={rowLoadingId === draft.id}
-                                                onClick={() => handleRowDelete(draft.id)}
-                                            >
-                                                {rowLoadingId === draft.id ? (
-                                                    <RefreshCw className="h-4 w-4 animate-spin" />
-                                                ) : (
-                                                    <Trash2 className="h-4 w-4" />
-                                                )}
-                                            </Button>
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between text-sm text-muted-foreground">
-                        <span>
-                            {meta.total === 0
-                                ? "Showing 0 of 0"
-                                : `Showing ${(meta.page - 1) * meta.pageSize + 1}-${Math.min(meta.page * meta.pageSize, meta.total)} of ${meta.total}`}
-                        </span>
-                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -874,7 +858,9 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                             >
                                 Previous
                             </Button>
-                            {renderPageButtons()}
+                            <div className="flex items-center gap-1">
+                                {renderPageButtons()}
+                            </div>
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -883,6 +869,106 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                             >
                                 Next
                             </Button>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                        Transactions appear after syncing and filtering your sources.
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                        Showing {drafts.length} item{drafts.length === 1 ? "" : "s"} (total {meta.total}).
+                    </p>
+                    {pageLoading && (
+                        <p className="text-xs text-muted-foreground">Refreshing transactions...</p>
+                    )}
+                    <div className="rounded-2xl border border-slate-200 bg-white">
+                        <div className="max-h-[560px] overflow-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-slate-50 text-xs uppercase text-slate-500 sticky top-0 z-10">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left font-medium">Date</th>
+                                        <th className="px-4 py-3 text-left font-medium">Opening Balance</th>
+                                        <th className="px-4 py-3 text-left font-medium">From</th>
+                                        <th className="px-4 py-3 text-left font-medium">Via</th>
+                                        <th className="px-4 py-3 text-left font-medium">To</th>
+                                        <th className="px-4 py-3 text-right font-medium">Amount</th>
+                                        <th className="px-4 py-3 text-left font-medium">Closing Balance</th>
+                                        <th className="px-4 py-3 text-left font-medium">Head Account</th>
+                                        <th className="px-4 py-3 text-left font-medium">Category</th>
+                                        <th className="px-4 py-3 text-left font-medium">Sub-category</th>
+                                        <th className="px-4 py-3 text-left font-medium">Remarks</th>
+                                        <th className="px-4 py-3 text-left font-medium">Attachments</th>
+                                        <th className="px-4 py-3 text-left font-medium">Comments</th>
+                                        <th className="px-4 py-3 text-right font-medium">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {drafts.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={14} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                                                {pageLoading ? "Loading transactions..." : "No transactions yet. Run a sync to populate this list."}
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        drafts.map((draft) => (
+                                            <tr key={draft.id} className="border-t border-slate-100">
+                                                <td className="px-4 py-3">{formatDate(draft.date)}</td>
+                                                <td className="px-4 py-3">
+                                                    {draft.openingBalance !== null && draft.openingBalance !== undefined
+                                                        ? formatCurrency(draft.openingBalance, draft.currency || "USD")
+                                                        : "—"}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {draft.fromEntity || renderSourceLabel(draft)}
+                                                </td>
+                                                <td className="px-4 py-3">{draft.viaEntity || "—"}</td>
+                                                <td className="px-4 py-3">
+                                                    <div className="font-medium text-slate-900">{draft.toEntity || draft.merchantTo || draft.descriptionVia || "—"}</div>
+                                                    <div className="text-xs text-muted-foreground">{draft.descriptionVia || draft.merchantTo || "No description"}</div>
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-semibold">
+                                                    {formatCurrency(draft.amount, draft.currency || "USD")}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {draft.closingBalance !== null && draft.closingBalance !== undefined
+                                                        ? formatCurrency(draft.closingBalance, draft.currency || "USD")
+                                                        : "—"}
+                                                </td>
+                                                <td className="px-4 py-3">{draft.headAccount || "—"}</td>
+                                                <td className="px-4 py-3">{draft.category || "—"}</td>
+                                                <td className="px-4 py-3">{draft.subCategory || "—"}</td>
+                                                <td className="px-4 py-3">{draft.remarks || "—"}</td>
+                                                <td className="px-4 py-3">
+                                                    {draft.attachments && draft.attachments.length
+                                                        ? `${draft.attachments.length} file${draft.attachments.length === 1 ? "" : "s"}`
+                                                        : "—"}
+                                                </td>
+                                                <td className="px-4 py-3">{draft.comments || "—"}</td>
+                                                <td className="px-4 py-3 text-right">
+                                                    <div className="flex justify-end gap-1">
+                                                        <Button variant="ghost" size="icon" onClick={() => openDialog("view", draft)}>
+                                                            <Eye className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" onClick={() => openDialog("edit", draft)}>
+                                                            <Pencil className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            disabled={!isCashTransaction(draft) || rowLoadingId === draft.id}
+                                                            onClick={() => handleRowDelete(draft.id)}
+                                                            title={isCashTransaction(draft) ? "Delete cash transaction" : "Only cash transactions can be deleted"}
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </CardContent>
@@ -906,17 +992,41 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                         <div className="space-y-4 text-sm">
                             <div className="grid gap-3 md:grid-cols-2">
                                 <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Source</p>
-                                    <p className="font-semibold">{renderSourceLabel(dialog.draft)}</p>
+                                    <p className="text-xs uppercase text-muted-foreground">From</p>
+                                    <p className="font-semibold">{dialog.draft.fromEntity || renderSourceLabel(dialog.draft)}</p>
                                     <p className="text-xs text-muted-foreground capitalize">{dialog.draft.account?.type || "account"}</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Merchant</p>
-                                    <p className="font-semibold">{dialog.draft.merchantTo || dialog.draft.descriptionVia || "—"}</p>
+                                    <p className="text-xs uppercase text-muted-foreground">Via</p>
+                                    <p>{dialog.draft.viaEntity || "—"}</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Description</p>
-                                    <p>{dialog.draft.descriptionVia || dialog.draft.merchantTo || "—"}</p>
+                                    <p className="text-xs uppercase text-muted-foreground">To</p>
+                                    <p className="font-semibold">{dialog.draft.toEntity || dialog.draft.merchantTo || dialog.draft.descriptionVia || "—"}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs uppercase text-muted-foreground">Opening Balance</p>
+                                    <p>
+                                        {dialog.draft.openingBalance !== null && dialog.draft.openingBalance !== undefined
+                                            ? formatCurrency(dialog.draft.openingBalance, dialog.draft.currency)
+                                            : "—"}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-xs uppercase text-muted-foreground">Amount</p>
+                                    <p>{formatCurrency(dialog.draft.amount, dialog.draft.currency)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs uppercase text-muted-foreground">Closing Balance</p>
+                                    <p>
+                                        {dialog.draft.closingBalance !== null && dialog.draft.closingBalance !== undefined
+                                            ? formatCurrency(dialog.draft.closingBalance, dialog.draft.currency)
+                                            : "—"}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-xs uppercase text-muted-foreground">Head Account</p>
+                                    <p>{dialog.draft.headAccount || "—"}</p>
                                 </div>
                                 <div>
                                     <p className="text-xs uppercase text-muted-foreground">Category</p>
@@ -927,37 +1037,33 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                                     <p>{dialog.draft.subCategory || "—"}</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Amount</p>
-                                    <p>{formatCurrency(dialog.draft.amount, dialog.draft.currency)}</p>
-                                </div>
-                                <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Currency</p>
-                                    <p>{dialog.draft.currency || "—"}</p>
-                                </div>
-                                <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Direction</p>
-                                    <p>—</p>
-                                </div>
-                                <div>
                                     <p className="text-xs uppercase text-muted-foreground">Date</p>
                                     <p>{formatDate(dialog.draft.date)}</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Reference</p>
-                                    <p>—</p>
-                                </div>
-                                <div>
                                     <p className="text-xs uppercase text-muted-foreground">Provider transaction id</p>
-                                    <p>{dialog.draft.id}</p>
+                                    <p>{dialog.draft.providerTransactionId || dialog.draft.id}</p>
                                 </div>
-                            </div>
-                            <div className="space-y-2">
-                                <p className="text-xs uppercase text-muted-foreground">Notes</p>
-                                <p>{dialog.draft.notes || "—"}</p>
                             </div>
                             <div className="space-y-2">
                                 <p className="text-xs uppercase text-muted-foreground">Remarks</p>
                                 <p>{dialog.draft.remarks || "—"}</p>
+                            </div>
+                            <div className="space-y-2">
+                                <p className="text-xs uppercase text-muted-foreground">Comments</p>
+                                <p>{dialog.draft.comments || "—"}</p>
+                            </div>
+                            <div className="space-y-2">
+                                <p className="text-xs uppercase text-muted-foreground">Attachments</p>
+                                {dialog.draft.attachments && dialog.draft.attachments.length ? (
+                                    <ul className="list-disc pl-4">
+                                        {dialog.draft.attachments.map((item, idx) => (
+                                            <li key={`${item}-${idx}`}>{item}</li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <p>—</p>
+                                )}
                             </div>
                         </div>
                     )}
@@ -971,6 +1077,32 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                                 <div className="space-y-1.5">
                                     <Label>Amount</Label>
                                     <Input type="number" value={editForm.amount} onChange={(e) => setEditForm((prev) => ({ ...prev, amount: e.target.value }))} />
+                                </div>
+                            </div>
+                            <div className="grid gap-3 md:grid-cols-2">
+                                <div className="space-y-1.5">
+                                    <Label>Head Account</Label>
+                                    <Input
+                                        value={editForm.headAccount}
+                                        onChange={(e) => setEditForm((prev) => ({ ...prev, headAccount: e.target.value }))}
+                                        placeholder="Required"
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label>Opening Balance</Label>
+                                    <Input
+                                        type="number"
+                                        value={editForm.openingBalance}
+                                        onChange={(e) => setEditForm((prev) => ({ ...prev, openingBalance: e.target.value }))}
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label>Closing Balance</Label>
+                                    <Input
+                                        type="number"
+                                        value={editForm.closingBalance}
+                                        onChange={(e) => setEditForm((prev) => ({ ...prev, closingBalance: e.target.value }))}
+                                    />
                                 </div>
                             </div>
                             <div className="grid gap-3 md:grid-cols-2">
@@ -1014,6 +1146,20 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                                     </Select>
                                 </div>
                             </div>
+                            <div className="grid gap-3 md:grid-cols-2">
+                                <div className="space-y-1.5">
+                                    <Label>From</Label>
+                                    <Input value={editForm.fromEntity} onChange={(e) => setEditForm((prev) => ({ ...prev, fromEntity: e.target.value }))} />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label>Via</Label>
+                                    <Input value={editForm.viaEntity} onChange={(e) => setEditForm((prev) => ({ ...prev, viaEntity: e.target.value }))} />
+                                </div>
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label>To</Label>
+                                <Input value={editForm.toEntity} onChange={(e) => setEditForm((prev) => ({ ...prev, toEntity: e.target.value }))} />
+                            </div>
                             <div className="space-y-1.5">
                                 <Label>Date</Label>
                                 <Input
@@ -1029,12 +1175,20 @@ export function SyncWorkbench({ accounts, cards, initialDrafts, initialMeta, cat
                                 <p className="text-xs text-muted-foreground">Description is copied from the source and not editable; update the Merchant to override who it is actually for.</p>
                             </div>
                             <div className="space-y-1.5">
-                                <Label>Notes</Label>
-                                <Textarea rows={3} value={editForm.notes} onChange={(e) => setEditForm((prev) => ({ ...prev, notes: e.target.value }))} />
-                            </div>
-                            <div className="space-y-1.5">
                                 <Label>Remarks</Label>
                                 <Textarea rows={3} value={editForm.remarks} onChange={(e) => setEditForm((prev) => ({ ...prev, remarks: e.target.value }))} />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label>Comments</Label>
+                                <Textarea rows={3} value={editForm.comments} onChange={(e) => setEditForm((prev) => ({ ...prev, comments: e.target.value }))} />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label>Attachments</Label>
+                                <Input
+                                    value={editForm.attachments}
+                                    onChange={(e) => setEditForm((prev) => ({ ...prev, attachments: e.target.value }))}
+                                    placeholder="Comma-separated URLs or filenames"
+                                />
                             </div>
                             <DialogFooter>
                                 <Button variant="ghost" onClick={closeDialog}>

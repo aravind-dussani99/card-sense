@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -13,10 +14,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Pencil, Trash2 } from "lucide-react";
+import { Eye, Trash2 } from "lucide-react";
 import { updateCard, deleteCard, type CardFormData } from "@/app/actions/card-actions";
 import { getCardTypes } from "@/app/actions/card-type-actions";
 import { getBanks } from "@/app/actions/bank-actions";
+import { createCardCredential } from "@/app/actions/credential-actions";
+import { apiFetch } from "@/lib/api";
+import { decryptPayload, encryptPayload, passphraseMarkerExists } from "@/lib/vault";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -32,9 +37,13 @@ interface EditCardDialogProps {
     card: {
         id: string;
         name: string;
+        nameOnCard?: string | null;
         bank: string;
         bankId?: string | null;
         last4: string;
+        fullCardNumber?: string | null;
+        expiryDate?: string | null;
+        cvv?: string | null;
         cardTypeId?: string | null;
         cardType?: { id: string; name: string } | null;
         limit: number;
@@ -46,10 +55,29 @@ interface EditCardDialogProps {
     };
 }
 
+type CardSensitiveData = {
+    label?: string;
+    fullCardNumber?: string;
+    nameOnCard?: string;
+    expiryDate?: string;
+    cvv?: string;
+    pin?: string;
+    appPassword?: string;
+    passphrase?: string;
+    memorableInfo?: string;
+    notes?: string;
+    statementPassword?: string;
+};
+
 export function EditCardDialog({ card }: EditCardDialogProps) {
     const [open, setOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [passphraseReady, setPassphraseReady] = useState(false);
+    const [passphrase, setPassphrase] = useState("");
+    const [secureUnlocked, setSecureUnlocked] = useState(false);
+    const [secureError, setSecureError] = useState<string | null>(null);
+    const [secureData, setSecureData] = useState<CardSensitiveData>({});
     const [cardTypes, setCardTypes] = useState<any[]>([]);
     const [banks, setBanks] = useState<any[]>([]);
     const [selectedCardType, setSelectedCardType] = useState<string>(card.cardTypeId || "");
@@ -62,7 +90,6 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
         cutoffDate: card.cutoffDate.toString(),
         dueDate: card.dueDate.toString(),
         color: card.color,
-        statementPassword: card.statementPassword || "",
     });
 
     useEffect(() => {
@@ -85,14 +112,65 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
                 cutoffDate: card.cutoffDate.toString(),
                 dueDate: card.dueDate.toString(),
                 color: card.color,
-                statementPassword: card.statementPassword || "",
             });
+            setPassphraseReady(passphraseMarkerExists());
+            setPassphrase("");
+            setSecureUnlocked(false);
+            setSecureError(null);
+            setSecureData({});
         }
     }, [open, card]);
+
+    const handleUnlock = async () => {
+        setSecureError(null);
+        if (!passphraseReady) {
+            setSecureError("Set a passphrase in Settings to view sensitive fields.");
+            return;
+        }
+        if (!passphrase) {
+            setSecureError("Enter your passphrase to unlock sensitive fields.");
+            return;
+        }
+        try {
+            const payloads = await apiFetch<any[]>(
+                `/api/credentials/cards?cardId=${encodeURIComponent(card.id)}&includePayload=true`
+            );
+            const payload = payloads?.[0]?.encryptedPayload;
+            if (payload) {
+                const decrypted = await decryptPayload(passphrase, payload);
+                setSecureData({
+                    label: decrypted.label,
+                    fullCardNumber: decrypted.fullCardNumber,
+                    nameOnCard: decrypted.nameOnCard,
+                    expiryDate: decrypted.expiryDate,
+                    cvv: decrypted.cvv,
+                    pin: decrypted.pin,
+                    appPassword: decrypted.appPassword,
+                    passphrase: decrypted.passphrase,
+                    memorableInfo: decrypted.memorableInfo,
+                    notes: decrypted.notes,
+                    statementPassword: decrypted.statementPassword,
+                });
+            } else {
+                setSecureData({
+                    nameOnCard: card.nameOnCard || "",
+                    fullCardNumber: card.fullCardNumber || "",
+                    expiryDate: card.expiryDate || "",
+                    cvv: card.cvv || "",
+                    statementPassword: card.statementPassword || "",
+                });
+            }
+            setSecureUnlocked(true);
+        } catch (error: any) {
+            setSecureError(error.message || "Failed to decrypt sensitive fields.");
+            setSecureUnlocked(false);
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setLoading(true);
+        setSecureError(null);
 
         const selectedBankData = banks.find(b => b.id === selectedBank);
         const bankName = selectedBankData?.name || card.bank;
@@ -108,17 +186,39 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
             cutoffDate: Number(formData.cutoffDate),
             dueDate: Number(formData.dueDate),
             color: formData.color,
-            statementPassword: formData.statementPassword || undefined,
         };
 
-        const result = await updateCard(card.id, data);
-        setLoading(false);
-
-        if (result.success) {
-            setOpen(false);
-        } else {
-            alert("Failed to update card");
+        if (secureUnlocked) {
+            if (secureData.nameOnCard !== undefined) data.nameOnCard = secureData.nameOnCard || undefined;
+            if (secureData.statementPassword !== undefined) {
+                data.statementPassword = secureData.statementPassword || undefined;
+            }
         }
+
+        const result = await updateCard(card.id, data);
+
+        if (!result.success) {
+            setLoading(false);
+            setSecureError("Failed to update card");
+            return;
+        }
+
+        if (secureUnlocked && passphrase) {
+            try {
+                const payload = await encryptPayload(passphrase, {
+                    ...secureData,
+                    label: secureData.label || card.name,
+                });
+                await createCardCredential(card.id, payload, secureData.label || card.name);
+            } catch (error: any) {
+                setSecureError(error.message || "Card saved, but sensitive fields could not be updated.");
+                setLoading(false);
+                return;
+            }
+        }
+
+        setLoading(false);
+        setOpen(false);
     };
 
     const handleDelete = async () => {
@@ -138,14 +238,14 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
         <>
             <Dialog open={open} onOpenChange={setOpen}>
                 <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-                    <Pencil className="h-4 w-4 mr-2" />
-                    Edit
+                    <Eye className="h-4 w-4 mr-2" />
+                    View
                 </Button>
                 <DialogContent className="sm:max-w-[600px]">
                     <DialogHeader>
-                        <DialogTitle>Edit Card</DialogTitle>
+                        <DialogTitle>View & Edit Card</DialogTitle>
                         <DialogDescription>
-                            Update the details of your credit card.
+                            Review and update the details of your credit card.
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleSubmit}>
@@ -275,18 +375,125 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
                                 </div>
                             </div>
 
-                            {/* Statement Password */}
-                            <div className="space-y-2">
-                                <Label htmlFor="statementPassword">Statement Password (Optional)</Label>
-                                <Input
-                                    id="statementPassword"
-                                    type="password"
-                                    value={formData.statementPassword}
-                                    onChange={(e) => setFormData({ ...formData, statementPassword: e.target.value })}
-                                    placeholder="Password for encrypted PDF statements"
-                                />
+                            <div className="rounded-lg border p-4 space-y-3">
+                                <div className="text-sm font-semibold">Sensitive fields</div>
+                                {!passphraseReady && (
+                                    <Alert variant="destructive">
+                                        <AlertTitle>Passphrase required</AlertTitle>
+                                        <AlertDescription className="flex flex-wrap items-center gap-2">
+                                            <span>Set a passphrase in Settings to view sensitive fields.</span>
+                                            <Button asChild size="sm" variant="outline">
+                                                <Link href="/settings">Go to Settings</Link>
+                                            </Button>
+                                        </AlertDescription>
+                                    </Alert>
+                                )}
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                    <div className="space-y-2 sm:col-span-2">
+                                        <Label htmlFor="passphrase">Passphrase</Label>
+                                        <Input
+                                            id="passphrase"
+                                            type="password"
+                                            value={passphrase}
+                                            onChange={(e) => setPassphrase(e.target.value)}
+                                            placeholder="Enter passphrase"
+                                        />
+                                    </div>
+                                    <div className="flex items-end">
+                                        <Button type="button" variant="outline" onClick={handleUnlock} disabled={!passphraseReady}>
+                                            Unlock
+                                        </Button>
+                                    </div>
+                                </div>
+                                {secureError && (
+                                    <Alert variant="destructive">
+                                        <AlertTitle>Error</AlertTitle>
+                                        <AlertDescription>{secureError}</AlertDescription>
+                                    </Alert>
+                                )}
+                                {secureUnlocked && (
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div className="space-y-2">
+                                            <Label>Credential Label</Label>
+                                            <Input
+                                                value={secureData.label || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, label: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Name on Card</Label>
+                                            <Input
+                                                value={secureData.nameOnCard || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, nameOnCard: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Full Card Number</Label>
+                                            <Input
+                                                value={secureData.fullCardNumber || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, fullCardNumber: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Expiry Date</Label>
+                                            <Input
+                                                value={secureData.expiryDate || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, expiryDate: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>CVV</Label>
+                                            <Input
+                                                value={secureData.cvv || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, cvv: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>PIN</Label>
+                                            <Input
+                                                value={secureData.pin || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, pin: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>App Password / PIN</Label>
+                                            <Input
+                                                value={secureData.appPassword || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, appPassword: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Memorable Info</Label>
+                                            <Input
+                                                value={secureData.memorableInfo || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, memorableInfo: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Passphrase</Label>
+                                            <Input
+                                                value={secureData.passphrase || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, passphrase: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Statement Password</Label>
+                                            <Input
+                                                value={secureData.statementPassword || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, statementPassword: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2 sm:col-span-2">
+                                            <Label>Notes</Label>
+                                            <Input
+                                                value={secureData.notes || ""}
+                                                onChange={(e) => setSecureData((prev) => ({ ...prev, notes: e.target.value }))}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
                                 <p className="text-xs text-muted-foreground">
-                                    Enter password if your bank statements are password-protected
+                                    Sensitive fields are encrypted before saving.
                                 </p>
                             </div>
                         </div>
@@ -327,4 +534,3 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
         </>
     );
 }
-

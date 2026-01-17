@@ -1,8 +1,5 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Eye, EyeOff } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { CardCountdown } from "@/components/card-countdown";
 
 interface CardDisplayProps {
@@ -27,46 +24,6 @@ interface CardDisplayProps {
 }
 
 export function CardDisplay({ card }: CardDisplayProps) {
-    const [showCardNumber, setShowCardNumber] = useState(false);
-    const [showCVV, setShowCVV] = useState(false);
-    const [cardNumberTimeout, setCardNumberTimeout] = useState<NodeJS.Timeout | null>(null);
-    const [cvvTimeout, setCvvTimeout] = useState<NodeJS.Timeout | null>(null);
-
-    // Auto-hide card number after 20 seconds
-    useEffect(() => {
-        if (showCardNumber) {
-            if (cardNumberTimeout) clearTimeout(cardNumberTimeout);
-            const timeout = setTimeout(() => {
-                setShowCardNumber(false);
-            }, 20000);
-            setCardNumberTimeout(timeout);
-        }
-        return () => {
-            if (cardNumberTimeout) clearTimeout(cardNumberTimeout);
-        };
-    }, [showCardNumber]);
-
-    // Auto-hide CVV after 20 seconds
-    useEffect(() => {
-        if (showCVV) {
-            if (cvvTimeout) clearTimeout(cvvTimeout);
-            const timeout = setTimeout(() => {
-                setShowCVV(false);
-            }, 20000);
-            setCvvTimeout(timeout);
-        }
-        return () => {
-            if (cvvTimeout) clearTimeout(cvvTimeout);
-        };
-    }, [showCVV]);
-
-    const formatCardNumber = (fullNumber: string | null | undefined) => {
-        if (!fullNumber) return `**** **** **** ${card.last4}`;
-        // Format as XXXX XXXX XXXX XXXX
-        const cleaned = fullNumber.replace(/\s/g, '');
-        return cleaned.match(/.{1,4}/g)?.join(' ') || fullNumber;
-    };
-
     const isAccount = card.cardCategory === "Bank Account";
     const availableCredit = card.limit - card.balance;
     const usedPercentage = card.limit > 0 ? (card.balance / card.limit) * 100 : 0;
@@ -98,23 +55,9 @@ export function CardDisplay({ card }: CardDisplayProps) {
                         <div className="flex-1">
                             <div className="text-xs text-muted-foreground">{isAccount ? "Account Number" : "Card Number"}</div>
                             <div className="text-sm font-mono tracking-wider">
-                                {showCardNumber && card.fullCardNumber
-                                    ? formatCardNumber(card.fullCardNumber)
-                                    : `**** **** **** ${card.last4}`}
+                                {`**** **** **** ${card.last4}`}
                             </div>
                         </div>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={() => setShowCardNumber(!showCardNumber)}
-                        >
-                            {showCardNumber ? (
-                                <EyeOff className="h-4 w-4" />
-                            ) : (
-                                <Eye className="h-4 w-4" />
-                            )}
-                        </Button>
                     </div>
                 </div>
 
@@ -123,28 +66,16 @@ export function CardDisplay({ card }: CardDisplayProps) {
                     <div>
                         <div className="text-xs text-muted-foreground">Exp</div>
                         <div className="text-sm font-medium">
-                            {card.expiryDate || "N/A"}
+                            {"••/••"}
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
                         <div>
                             <div className="text-xs text-muted-foreground">CVV</div>
                             <div className="text-sm font-mono">
-                                {showCVV && card.cvv ? card.cvv : "***"}
+                                {"***"}
                             </div>
                         </div>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={() => setShowCVV(!showCVV)}
-                        >
-                            {showCVV ? (
-                                <EyeOff className="h-4 w-4" />
-                            ) : (
-                                <Eye className="h-4 w-4" />
-                            )}
-                        </Button>
                     </div>
                 </div>
 
@@ -210,4 +141,3 @@ export function CardDisplay({ card }: CardDisplayProps) {
         </div>
     );
 }
-

@@ -5,6 +5,7 @@ import { Landmark } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
+import { ViewAccountDialog } from "@/components/view-account-dialog";
 
 type BankAccountDisplay = {
     id: string;
@@ -62,7 +63,7 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                     const bankLabel = getBankLabel(acct);
                     const accountRef = acct.mask || acct.providerAccountId || "••••";
                     return (
-                        <div key={acct.id} className="p-4 rounded-lg border shadow-sm flex flex-col gap-2">
+                        <div key={acct.id} className="p-4 rounded-lg border shadow-sm flex flex-col gap-2 max-w-sm w-full mx-auto">
                             <div className="text-sm text-muted-foreground">
                                 <span className="inline-flex items-center gap-1">
                                     <Landmark className="h-4 w-4" />
@@ -82,6 +83,7 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                                 </div>
                             )}
                             <div className="mt-2 flex gap-2">
+                                <ViewAccountDialog account={acct} />
                                 <Button
                                     variant="outline"
                                     className="text-red-600 border-red-200 hover:bg-red-50"

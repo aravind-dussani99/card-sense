@@ -84,3 +84,27 @@ export async function addBankAccount(data: {
         return { success: false, error: error.message || "Failed to add bank account" };
     }
 }
+
+export async function updateBankAccount(
+    id: string,
+    data: {
+        name?: string;
+        type?: string;
+        currency?: string;
+        mask?: string;
+        tags?: string;
+        balance?: number;
+        availableBalance?: number;
+        limit?: number;
+    }
+) {
+    try {
+        return await apiFetch(`/api/bank/accounts/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+        });
+    } catch (error: any) {
+        console.error("Failed to update bank account:", error);
+        return { success: false, error: error.message || "Failed to update bank account" };
+    }
+}

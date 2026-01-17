@@ -17,6 +17,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { getMonthToDateRange } from "@/lib/utils";
 
 type SourceOption = {
     id: string;
@@ -74,11 +75,12 @@ export function ApprovedTransactionsBoard({
     initialMeta,
     categories,
 }: ApprovedTransactionsBoardProps) {
+    const monthToDate = useMemo(() => getMonthToDateRange(), []);
     const [filters, setFilters] = useState({
         scope: "all",
         sourceId: "all",
-        from: "",
-        to: "",
+        from: monthToDate.from,
+        to: monthToDate.to,
         categoryId: "all",
         subCategoryId: "all",
         search: "",
@@ -162,7 +164,7 @@ export function ApprovedTransactionsBoard({
         setFeedback(null);
         try {
             const params = buildParams(page);
-            const response = await fetch(`/api/sync-workbench/approved?${params.toString()}`, { cache: "no-store" });
+            const response = await fetch(`/api/transactions/approved?${params.toString()}`, { cache: "no-store" });
             const data = await readJson<{ success: boolean; data: ApprovedRecord[]; meta: Meta; error?: string }>(response);
             if (!response.ok || !data.success) throw new Error(data.error || "Failed to load transactions");
             setTransactions(data.data);
@@ -179,11 +181,12 @@ export function ApprovedTransactionsBoard({
     };
 
     const resetFilters = () => {
+        const range = getMonthToDateRange();
         setFilters({
             scope: "all",
             sourceId: "all",
-            from: "",
-            to: "",
+            from: range.from,
+            to: range.to,
             categoryId: "all",
             subCategoryId: "all",
             search: "",
@@ -330,7 +333,7 @@ export function ApprovedTransactionsBoard({
                             {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
                             Filter
                         </Button>
-                        <Button variant="ghost" onClick={resetFilters} disabled={loading}>
+                        <Button variant="outline" onClick={resetFilters} disabled={loading}>
                             Reset
                         </Button>
                     </div>

@@ -55,6 +55,25 @@ export async function getTransactions(filters?: {
     }
 }
 
+export async function getBankTransactions(limit = 100) {
+    try {
+        const params = new URLSearchParams({
+            page: "1",
+            pageSize: String(limit),
+        });
+        const response = await apiFetch<{ success: boolean; data: any[]; meta?: any; error?: string }>(
+            `/api/transactions/drafts?${params.toString()}`
+        );
+        if (!response?.success) {
+            return [];
+        }
+        return response.data || [];
+    } catch (error) {
+        console.error("Failed to fetch bank transactions:", error);
+        return [];
+    }
+}
+
 export async function getTransaction(id: string) {
     try {
         return await apiFetch(`/api/transactions/${id}`);

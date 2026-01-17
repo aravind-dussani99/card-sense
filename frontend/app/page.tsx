@@ -4,12 +4,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { CreditCard, DollarSign, TrendingUp, Activity } from "lucide-react"
 import { BankTransactionList } from "@/components/bank-transaction-list"
 import { AIInsights } from "@/components/ai-insights"
-import { FloatingAddButton } from "@/components/floating-add-button"
 import { getCards } from "@/app/actions/card-actions"
 import { getCategories } from "@/app/actions/category-actions"
 import { getSpendingByMerchant } from "@/app/actions/analytics-actions"
 import { MerchantSpendChart } from "@/components/merchant-spend-chart"
-import { getTransactions } from "@/app/actions/transaction-actions"
+import { getBankTransactions } from "@/app/actions/transaction-actions"
 
 export const metadata: Metadata = {
   title: "Dashboard - CardSense",
@@ -20,7 +19,7 @@ export default async function DashboardPage() {
   const cards: any[] = await getCards();
   const categories = await getCategories();
   const merchantData = await getSpendingByMerchant();
-  const recentTransactions = await getTransactions({ limit: 10 });
+  const recentTransactions = await getBankTransactions(10);
 
   const totalBalance = cards.reduce((acc, card) => acc + card.balance, 0);
   const activeCards = cards.length;
@@ -107,12 +106,12 @@ export default async function DashboardPage() {
               <BankTransactionList
                 transactions={recentTransactions.map((tx: any) => ({
                   id: tx.id,
-                  merchant: tx.merchant,
-                  descriptionVia: tx.description,
-                  category: tx.category,
+                  merchant: tx.merchant || tx.descriptionVia || "Unknown",
+                  descriptionVia: tx.descriptionVia || tx.merchant || "",
+                  category: tx.category || "Uncategorized",
                   amount: tx.amount,
-                  currency: "USD",
-                  account: tx.card ? { name: tx.card.name, type: "Card" } : null,
+                  currency: tx.currency || "USD",
+                  account: tx.account ? { name: tx.account.name || "Account", type: tx.account.type || "Account" } : null,
                 }))}
               />
             </CardContent>
@@ -133,7 +132,6 @@ export default async function DashboardPage() {
           <MerchantSpendChart data={merchantData} />
         </div>
       </div>
-      <FloatingAddButton cards={cards} categories={categories} />
     </div>
   )
 }
