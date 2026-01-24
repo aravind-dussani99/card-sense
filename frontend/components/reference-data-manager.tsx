@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -42,12 +42,18 @@ interface ListItem {
     categoryName?: string;
 }
 
-export function ReferenceDataManager() {
+interface ReferenceDataManagerProps {
+    initialCardTypes: CardType[];
+    initialBanks: Bank[];
+    initialCategories: Category[];
+}
+
+export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCategories }: ReferenceDataManagerProps) {
     const router = useRouter();
-    const [cardTypes, setCardTypes] = useState<CardType[]>([]);
-    const [banks, setBanks] = useState<Bank[]>([]);
-    const [categories, setCategories] = useState<Category[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [cardTypes, setCardTypes] = useState<CardType[]>(initialCardTypes);
+    const [banks, setBanks] = useState<Bank[]>(initialBanks);
+    const [categories, setCategories] = useState<Category[]>(initialCategories);
+    const [loading, setLoading] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<ListItem | null>(null);
@@ -56,7 +62,6 @@ export function ReferenceDataManager() {
     const [formData, setFormData] = useState({ name: "", icon: "", color: "", categoryId: "", type: "" });
     const [newSubCategory, setNewSubCategory] = useState<Record<string, string>>({});
     const [editingSub, setEditingSub] = useState<{ id: string; name: string } | null>(null);
-    const [subLoading, setSubLoading] = useState(false);
 
     const loadData = async () => {
         setLoading(true);
@@ -70,10 +75,6 @@ export function ReferenceDataManager() {
         setCategories(categoriesData);
         setLoading(false);
     };
-
-    useEffect(() => {
-        void loadData();
-    }, []);
 
     const handleAddNew = (type: DataType) => {
         setEditingItem(null);

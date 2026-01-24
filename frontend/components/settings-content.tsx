@@ -9,7 +9,7 @@ import Link from "next/link"
 import { BankConnect } from "@/components/bank-connect"
 import { BankCredentialsManager } from "@/components/bank-credentials-manager"
 import { CardCredentialsManager } from "@/components/card-credentials-manager"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { apiFetch } from "@/lib/api"
 import { getErrorMessage } from "@/lib/errors"
@@ -60,15 +60,6 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
         }
     };
 
-    const connectionsWithExpiry = useMemo(() => {
-        const now = Date.now();
-        return localConnections.map((connection) => {
-            const createdAt = connection.createdAt ? new Date(connection.createdAt).getTime() : now;
-            const days = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
-            const daysLeft = Math.max(0, 90 - days);
-            return { ...connection, daysLeft };
-        });
-    }, [localConnections]);
 
     const handlePassphraseClear = () => {
         clearPassphraseMarker();
@@ -272,14 +263,17 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
                             <AlertDescription>{feedback.message}</AlertDescription>
                         </Alert>
                     )}
-                    {connectionsWithExpiry.map((c) => {
+                    {localConnections.map((c) => {
+                        const daysLeft = c.daysLeft ?? null;
                         return (
                             <div key={c.id} className="flex items-center justify-between border rounded-lg p-3">
                                     <div className="space-y-1">
                                         <div className="font-medium">{c.institutionId || c.provider}</div>
                                         <div className="text-xs text-muted-foreground">User: {c.userId}</div>
                                 <div className="text-xs text-muted-foreground">
-                                    Reconnect in ~{c.daysLeft} day{c.daysLeft === 1 ? "" : "s"}
+                                    {daysLeft === null
+                                        ? "Reconnect in ~— days"
+                                        : `Reconnect in ~${daysLeft} day${daysLeft === 1 ? "" : "s"}`}
                                 </div>
                             </div>
                             <Button

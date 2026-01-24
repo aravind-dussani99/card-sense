@@ -56,7 +56,7 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                     <AlertDescription>{feedback.message}</AlertDescription>
                 </Alert>
             )}
-            <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
                 {list.map((acct) => {
                     const balanceValue = acct.availableBalance ?? acct.balance ?? null;
                     const balanceText = balanceValue === null ? "—" : balanceValue.toFixed(2);
@@ -64,7 +64,7 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                     const bankLabel = getBankLabel(acct);
                     const accountRef = acct.mask || acct.providerAccountId || "••••";
                     return (
-                        <div key={acct.id} className="p-4 rounded-lg border shadow-sm flex flex-col gap-2 max-w-sm w-full mx-auto">
+                        <div key={acct.id} className="p-4 rounded-lg border shadow-sm flex flex-col gap-2 w-full">
                             <div className="text-sm text-muted-foreground">
                                 <span className="inline-flex items-center gap-1">
                                     <Landmark className="h-4 w-4" />

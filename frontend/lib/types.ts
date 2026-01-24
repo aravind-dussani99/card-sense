@@ -23,6 +23,7 @@ export type BankConnection = {
   status?: string | null;
   userId?: string | null;
   createdAt?: string;
+  daysLeft?: number;
 };
 
 export type BankAccount = {

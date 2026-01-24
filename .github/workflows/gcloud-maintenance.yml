@@ -32,12 +32,13 @@ permissions:
   id-token: write
 
 env:
-  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-  REGION: ${{ vars.GCP_REGION }}
-  SQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE }}
-  SQL_INSTANCE_CONNECTION: ${{ vars.CLOUDSQL_INSTANCE_CONNECTION }}
-  SQL_DB: ${{ vars.CLOUDSQL_DB_DEV }}
-  SQL_USER: ${{ vars.CLOUDSQL_USER }}
+  PROJECT_ID: seismic-box-476911-v9
+  REGION: asia-south2
+  SQL_INSTANCE: logitrack-cloudsql-v2-instance
+  SQL_INSTANCE_CONNECTION: seismic-box-476911-v9:asia-south2:logitrack-cloudsql-v2-instance
+  SQL_DB: card_sense_dev
+  SQL_USER: logitrack_cloudsql_v2_user
+  CARD_SENSE_SA: card-sense-github-actions-sa@seismic-box-476911-v9.iam.gserviceaccount.com
   DATABASE_URL_DEV: ${{ secrets.DATABASE_URL_DEV }}
   DATABASE_URL_PROD: ${{ secrets.DATABASE_URL_PROD }}
 
@@ -52,7 +53,7 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.CARD_SENSE_SA_KEY }}
-          service_account: ${{ vars.CARD_SENSE_SA }}
+          service_account: ${{ env.CARD_SENSE_SA }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2

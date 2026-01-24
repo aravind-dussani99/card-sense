@@ -1,18 +1,13 @@
 import { Metadata } from "next"
 import { MainNav } from "@/components/main-nav"
-import { AddCardDialog } from "@/components/add-card-dialog"
-import { AddAccountDialog } from "@/components/add-account-dialog"
-import { EditCardDialog } from "@/components/edit-card-dialog"
-import { CardDisplay } from "@/components/card-display"
-import { BankAccountsList } from "@/components/bank-accounts-list"
 import { getCards } from "@/app/actions/card-actions"
-import { CreditCard as CardIcon } from "lucide-react"
 import { getBankAccounts } from "@/app/actions/bank-actions"
 import { BankAccount, Card } from "@/lib/types"
+import { AccountsHubContent } from "@/components/accounts-hub-content"
 
 export const metadata: Metadata = {
-    title: "Cards & Accounts - CardSense",
-    description: "Manage your credit cards and bank accounts.",
+    title: "Accounts Hub - CardSense",
+    description: "Manage your bank accounts, overdrafts, and credit cards.",
 }
 
 export default async function CardsPage() {
@@ -27,46 +22,7 @@ export default async function CardsPage() {
                     <MainNav className="mx-6" />
                 </div>
             </div>
-            <div className="flex-1 space-y-4 p-8 pt-6">
-                <div className="flex items-center justify-between space-y-2">
-                    <div>
-                        <h2 className="text-3xl font-bold tracking-tight">Cards & Accounts</h2>
-                        <p className="text-muted-foreground mt-1">
-                            Manage your credit cards and bank accounts
-                        </p>
-                    </div>
-                    <div className="flex gap-2">
-                        <AddCardDialog />
-                        <AddAccountDialog />
-                    </div>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-                    {cards.map((card) => (
-                        <div key={card.id} className="relative max-w-sm w-full mx-auto">
-                            <div className="absolute left-3 top-3 text-gray-500">
-                                <CardIcon className="h-4 w-4" />
-                            </div>
-                            <CardDisplay card={card} />
-                            <div className="absolute bottom-4 right-4">
-                                <EditCardDialog card={card} />
-                            </div>
-                        </div>
-                    ))}
-                </div>
-                <div className="mt-8 space-y-3">
-                    <div>
-                        <h3 className="text-xl font-semibold">Bank Accounts</h3>
-                        <p className="text-sm text-muted-foreground">
-                            Manual accounts and connected bank accounts live here.
-                        </p>
-                    </div>
-                    {bankAccounts.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No bank accounts yet.</p>
-                    ) : (
-                        <BankAccountsList bankAccounts={bankAccounts} />
-                    )}
-                </div>
-            </div>
+            <AccountsHubContent cards={cards} bankAccounts={bankAccounts} />
         </div>
     )
 }

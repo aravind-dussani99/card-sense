@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { CreditCard, Home, PieChart, DollarSign, Receipt, Settings } from "lucide-react"
+import { CreditCard, Home, PieChart, DollarSign, Receipt, Settings, Gift } from "lucide-react"
 
 export function MainNav({
     className,
@@ -26,7 +26,7 @@ export function MainNav({
             >
                 <div className="flex items-center gap-2">
                     <CreditCard className="h-4 w-4" />
-                    Cards & Accounts
+                    Accounts Hub
                 </div>
             </Link>
             <Link
@@ -54,6 +54,15 @@ export function MainNav({
                 <div className="flex items-center gap-2">
                     <DollarSign className="h-4 w-4" />
                     Balances
+                </div>
+            </Link>
+            <Link
+                href="/rewards"
+                className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+            >
+                <div className="flex items-center gap-2">
+                    <Gift className="h-4 w-4" />
+                    Rewards
                 </div>
             </Link>
             <Link

@@ -9,6 +9,7 @@ type BankTransactionLite = {
     category?: string | null;
     amount: number;
     currency?: string | null;
+    date?: string | null;
     account?: { name?: string | null; type?: string | null } | null;
 };
 
@@ -28,26 +29,51 @@ export function BankTransactionList({ transactions }: { transactions: BankTransa
     };
 
     return (
-        <div className="space-y-4">
-            {transactions.slice(0, 10).map((transaction) => {
-                const title = transaction.merchant || transaction.descriptionVia || "Unknown";
-                return (
-                    <div key={transaction.id} className="flex items-center gap-4">
-                        <Avatar className="h-9 w-9">
-                            <AvatarFallback>{title[0]}</AvatarFallback>
-                        </Avatar>
-                        <div className="ml-4 flex-1 space-y-1">
-                            <p className="text-sm font-medium leading-none">{title}</p>
-                            <p className="text-sm text-muted-foreground">
-                                {transaction.category || "Uncategorized"} {transaction.account ? `• ${transaction.account.name || transaction.account.type || "Account"}` : ""}
-                            </p>
-                        </div>
-                        <div className="ml-auto font-medium">
-                            {formatAmount(transaction.amount, transaction.currency)}
-                        </div>
-                    </div>
-                );
-            })}
+        <div className="overflow-hidden rounded-lg border">
+            <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-muted-foreground">
+                    <tr>
+                        <th className="px-3 py-2 text-left font-medium">Date</th>
+                        <th className="px-3 py-2 text-left font-medium">Merchant</th>
+                        <th className="px-3 py-2 text-left font-medium">Category</th>
+                        <th className="px-3 py-2 text-left font-medium">Account</th>
+                        <th className="px-3 py-2 text-right font-medium">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {transactions.slice(0, 10).map((transaction) => {
+                        const title = transaction.merchant || transaction.descriptionVia || "Unknown";
+                        const dateLabel = transaction.date
+                            ? new Date(transaction.date).toLocaleDateString("en-GB", {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "numeric",
+                              })
+                            : "—";
+                        const accountLabel = transaction.account
+                            ? transaction.account.name || transaction.account.type || "Account"
+                            : "—";
+                        return (
+                            <tr key={transaction.id} className="border-t">
+                                <td className="px-3 py-2">{dateLabel}</td>
+                                <td className="px-3 py-2">
+                                    <div className="flex items-center gap-2">
+                                        <Avatar className="h-7 w-7">
+                                            <AvatarFallback>{title[0]}</AvatarFallback>
+                                        </Avatar>
+                                        <span className="font-medium">{title}</span>
+                                    </div>
+                                </td>
+                                <td className="px-3 py-2">{transaction.category || "Uncategorized"}</td>
+                                <td className="px-3 py-2">{accountLabel}</td>
+                                <td className="px-3 py-2 text-right font-medium">
+                                    {formatAmount(transaction.amount, transaction.currency)}
+                                </td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
         </div>
     );
 }

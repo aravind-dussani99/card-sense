@@ -10,6 +10,13 @@ export const metadata: Metadata = {
 
 export default async function SettingsPage() {
     const connections = await getBankConnections();
+    const now = Date.now();
+    const connectionsWithExpiry = connections.map((connection) => {
+        const createdAt = connection.createdAt ? new Date(connection.createdAt).getTime() : now;
+        const days = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+        const daysLeft = Math.max(0, 90 - days);
+        return { ...connection, daysLeft };
+    });
 
     return (
         <div className="flex flex-col min-h-screen">
@@ -23,7 +30,7 @@ export default async function SettingsPage() {
                 <div className="flex items-center justify-between space-y-2">
                     <h2 className="text-3xl font-bold tracking-tight">Settings</h2>
                 </div>
-                <SettingsContent connections={connections} />
+                <SettingsContent connections={connectionsWithExpiry} />
             </div>
         </div>
     )
