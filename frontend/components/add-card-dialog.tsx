@@ -24,6 +24,7 @@ import { Plus } from "lucide-react";
 import { addCard } from "@/app/actions/card-actions";
 import { getBanks } from "@/app/actions/bank-actions";
 import { getCardTypes } from "@/app/actions/card-type-actions";
+import { Bank, CardType } from "@/lib/types";
 import { createCardCredential } from "@/app/actions/credential-actions";
 import { encryptPayload } from "@/lib/vault";
 
@@ -41,8 +42,8 @@ export function AddCardDialog({ open: controlledOpen, onOpenChange, prefillData 
     const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
     const setOpen = onOpenChange || setInternalOpen;
     const [loading, setLoading] = useState(false);
-    const [banks, setBanks] = useState<any[]>([]);
-    const [cardTypes, setCardTypes] = useState<any[]>([]);
+    const [banks, setBanks] = useState<Bank[]>([]);
+    const [cardTypes, setCardTypes] = useState<CardType[]>([]);
     const [selectedBank, setSelectedBank] = useState<string>("");
     const [selectedCardType, setSelectedCardType] = useState<string>("");
     const [last3DueDates, setLast3DueDates] = useState<string[]>(["", "", ""]);
@@ -88,7 +89,6 @@ export function AddCardDialog({ open: controlledOpen, onOpenChange, prefillData 
         const formData = new FormData(e.currentTarget);
 
         const selectedBankData = banks.find(b => b.id === selectedBank);
-        const selectedCardTypeData = cardTypes.find(ct => ct.id === selectedCardType);
 
         // Calculate predicted next due date from last 3
         const validDates = last3DueDates.filter(d => d).map(d => new Date(d));

@@ -5,6 +5,7 @@ import { Landmark } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 import { ViewAccountDialog } from "@/components/view-account-dialog";
 
 type BankAccountDisplay = {
@@ -33,8 +34,8 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
             await apiFetch(`/api/bank/accounts/${id}`, { method: "DELETE", skipJson: true });
             setList((prev) => prev.filter((acct) => acct.id !== id));
             setFeedback({ type: "success", message: `${label} removed.` });
-        } catch (err: any) {
-            setFeedback({ type: "error", message: err.message || "Failed to delete" });
+        } catch (err) {
+            setFeedback({ type: "error", message: getErrorMessage(err, "Failed to delete") });
         } finally {
             setLoadingId(null);
         }

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { apiFetch } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 import { encryptPayload, decryptPayload } from "@/lib/vault";
 
 type BankAccount = {
@@ -22,6 +23,20 @@ type CredentialMeta = {
   id: string;
   bankAccountId: string;
   label?: string | null;
+};
+
+type CredentialRecord = CredentialMeta & {
+  encryptedPayload?: string | null;
+};
+
+type DecryptedCredentials = {
+  username?: string;
+  customerName?: string;
+  password?: string;
+  passphrase?: string;
+  memorableInfo?: string;
+  authDetails?: string;
+  label?: string;
 };
 
 export function BankCredentialsManager() {
@@ -40,7 +55,7 @@ export function BankCredentialsManager() {
     memorableInfo: "",
     authDetails: "",
   });
-  const [decrypted, setDecrypted] = useState<any | null>(null);
+  const [decrypted, setDecrypted] = useState<DecryptedCredentials | null>(null);
   const [viewPassphrase, setViewPassphrase] = useState("");
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -53,8 +68,8 @@ export function BankCredentialsManager() {
         ]);
         setAccounts(acctData);
         setCredentials(credData);
-      } catch (error: any) {
-        setFeedback({ type: "error", message: error.message || "Failed to load accounts" });
+      } catch (error) {
+        setFeedback({ type: "error", message: getErrorMessage(error, "Failed to load accounts") });
       }
     };
     load();
@@ -104,8 +119,8 @@ export function BankCredentialsManager() {
       setFeedback({ type: "success", message: "Credentials stored for account." });
       const updated = await apiFetch<CredentialMeta[]>("/api/credentials/accounts");
       setCredentials(updated);
-    } catch (error: any) {
-      setFeedback({ type: "error", message: error.message || "Failed to store credentials" });
+    } catch (error) {
+      setFeedback({ type: "error", message: getErrorMessage(error, "Failed to store credentials") });
     }
   };
 
@@ -116,7 +131,7 @@ export function BankCredentialsManager() {
       return;
     }
     try {
-      const records = await apiFetch<any[]>(
+      const records = await apiFetch<CredentialRecord[]>(
         `/api/credentials/accounts?bankAccountId=${encodeURIComponent(activeAccount.id)}&includePayload=true`
       );
       const record = records?.[0];
@@ -126,8 +141,8 @@ export function BankCredentialsManager() {
       }
       const data = await decryptPayload(viewPassphrase, record.encryptedPayload);
       setDecrypted(data);
-    } catch (error: any) {
-      setFeedback({ type: "error", message: error.message || "Failed to decrypt credentials." });
+    } catch (error) {
+      setFeedback({ type: "error", message: getErrorMessage(error, "Failed to decrypt credentials.") });
     }
   };
 

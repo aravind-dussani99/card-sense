@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { apiFetch } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 import { decryptPayload } from "@/lib/vault";
 
 type CardRecord = {
@@ -24,13 +25,23 @@ type CredentialMeta = {
   encryptedPayload?: string;
 };
 
+type DecryptedCardCredentials = {
+  fullCardNumber?: string;
+  expiryDate?: string;
+  cvv?: string;
+  pin?: string;
+  cardPassword?: string;
+  memo?: string;
+  label?: string;
+};
+
 export function CardCredentialsManager() {
   const [cards, setCards] = useState<CardRecord[]>([]);
   const [credentials, setCredentials] = useState<CredentialMeta[]>([]);
   const [viewOpen, setViewOpen] = useState(false);
   const [activeCard, setActiveCard] = useState<CardRecord | null>(null);
   const [passphrase, setPassphrase] = useState("");
-  const [decrypted, setDecrypted] = useState<any | null>(null);
+  const [decrypted, setDecrypted] = useState<DecryptedCardCredentials | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   useEffect(() => {
@@ -42,8 +53,8 @@ export function CardCredentialsManager() {
         ]);
         setCards(cardData);
         setCredentials(credData);
-      } catch (error: any) {
-        setFeedback({ type: "error", message: error.message || "Failed to load cards" });
+      } catch (error) {
+        setFeedback({ type: "error", message: getErrorMessage(error, "Failed to load cards") });
       }
     };
     load();
@@ -79,8 +90,8 @@ export function CardCredentialsManager() {
       }
       const data = await decryptPayload(passphrase, record.encryptedPayload);
       setDecrypted(data);
-    } catch (error: any) {
-      setFeedback({ type: "error", message: error.message || "Failed to decrypt credentials." });
+    } catch (error) {
+      setFeedback({ type: "error", message: getErrorMessage(error, "Failed to decrypt credentials.") });
     }
   };
 

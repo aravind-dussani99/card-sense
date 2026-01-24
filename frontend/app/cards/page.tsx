@@ -7,8 +7,8 @@ import { CardDisplay } from "@/components/card-display"
 import { BankAccountsList } from "@/components/bank-accounts-list"
 import { getCards } from "@/app/actions/card-actions"
 import { CreditCard as CardIcon } from "lucide-react"
-import { getCategories } from "@/app/actions/category-actions"
 import { getBankAccounts } from "@/app/actions/bank-actions"
+import { BankAccount, Card } from "@/lib/types"
 
 export const metadata: Metadata = {
     title: "Cards & Accounts - CardSense",
@@ -16,9 +16,8 @@ export const metadata: Metadata = {
 }
 
 export default async function CardsPage() {
-    const cards: any[] = await getCards();
-    const categories = await getCategories();
-    const bankAccounts: any[] = await getBankAccounts();
+    const cards: Card[] = await getCards();
+    const bankAccounts: BankAccount[] = await getBankAccounts();
 
     return (
         <div className="flex flex-col min-h-screen">

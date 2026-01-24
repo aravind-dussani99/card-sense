@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { Calendar, Clock } from "lucide-react";
 
 interface CardCountdownProps {
     card: {
@@ -60,7 +59,7 @@ export function CardCountdown({ card }: CardCountdownProps) {
                         }
                     }
                 }
-            } catch (e) {
+            } catch {
                 // If parsing fails, use default calculation
             }
         }
@@ -108,4 +107,3 @@ export function CardCountdown({ card }: CardCountdownProps) {
         </div>
     );
 }
-

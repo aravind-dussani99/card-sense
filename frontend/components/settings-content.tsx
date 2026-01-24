@@ -9,14 +9,16 @@ import Link from "next/link"
 import { BankConnect } from "@/components/bank-connect"
 import { BankCredentialsManager } from "@/components/bank-credentials-manager"
 import { CardCredentialsManager } from "@/components/card-credentials-manager"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { apiFetch } from "@/lib/api"
+import { getErrorMessage } from "@/lib/errors"
+import { BankConnection } from "@/lib/types"
 import { clearPassphraseMarker, passphraseMarkerExists, setPassphraseMarker } from "@/lib/vault"
 
-export function SettingsContent({ connections = [] }: { connections?: any[] }) {
+export function SettingsContent({ connections = [] }: { connections?: BankConnection[] }) {
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
-    const [localConnections, setLocalConnections] = useState(connections);
+    const [localConnections, setLocalConnections] = useState<BankConnection[]>(connections);
     const [passphraseSet, setPassphraseSet] = useState(false);
     const [passphrase, setPassphrase] = useState("");
     const [passphraseConfirm, setPassphraseConfirm] = useState("");
@@ -31,9 +33,9 @@ export function SettingsContent({ connections = [] }: { connections?: any[] }) {
         try {
             await apiFetch(`/api/bank/connections/${id}`, { method: "DELETE", skipJson: true });
             setFeedback({ type: "success", message: `${label} disconnected successfully.` });
-            setLocalConnections((prev: any[]) => prev.filter((c) => c.id !== id));
-        } catch (err: any) {
-            setFeedback({ type: "error", message: err.message || "Failed to disconnect" });
+            setLocalConnections((prev) => prev.filter((c) => c.id !== id));
+        } catch (err) {
+            setFeedback({ type: "error", message: getErrorMessage(err, "Failed to disconnect") });
         }
     };
 
@@ -53,10 +55,20 @@ export function SettingsContent({ connections = [] }: { connections?: any[] }) {
             setPassphrase("");
             setPassphraseConfirm("");
             setPassphraseStatus({ type: "success", message: "Passphrase saved on this device." });
-        } catch (error: any) {
-            setPassphraseStatus({ type: "error", message: error.message || "Failed to save passphrase." });
+        } catch (error) {
+            setPassphraseStatus({ type: "error", message: getErrorMessage(error, "Failed to save passphrase.") });
         }
     };
+
+    const connectionsWithExpiry = useMemo(() => {
+        const now = Date.now();
+        return localConnections.map((connection) => {
+            const createdAt = connection.createdAt ? new Date(connection.createdAt).getTime() : now;
+            const days = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+            const daysLeft = Math.max(0, 90 - days);
+            return { ...connection, daysLeft };
+        });
+    }, [localConnections]);
 
     const handlePassphraseClear = () => {
         clearPassphraseMarker();
@@ -260,16 +272,14 @@ export function SettingsContent({ connections = [] }: { connections?: any[] }) {
                             <AlertDescription>{feedback.message}</AlertDescription>
                         </Alert>
                     )}
-                    {localConnections.map((c) => {
-                        const days = Math.floor((Date.now() - new Date(c.createdAt).getTime()) / (1000 * 60 * 60 * 24));
-                        const daysLeft = Math.max(0, 90 - days);
+                    {connectionsWithExpiry.map((c) => {
                         return (
                             <div key={c.id} className="flex items-center justify-between border rounded-lg p-3">
                                     <div className="space-y-1">
                                         <div className="font-medium">{c.institutionId || c.provider}</div>
                                         <div className="text-xs text-muted-foreground">User: {c.userId}</div>
                                 <div className="text-xs text-muted-foreground">
-                                    Reconnect in ~{daysLeft} day{daysLeft === 1 ? "" : "s"}
+                                    Reconnect in ~{c.daysLeft} day{c.daysLeft === 1 ? "" : "s"}
                                 </div>
                             </div>
                             <Button

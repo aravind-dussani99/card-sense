@@ -1,6 +1,8 @@
 "use server";
 
 import { apiFetch } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
+import { ApiResponse, BankTransaction } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
 export interface TransactionFormData {
@@ -48,7 +50,7 @@ export async function getTransactions(filters?: {
         if (filters?.dateTo) params.set("dateTo", filters.dateTo.toISOString());
         if (filters?.limit) params.set("limit", String(filters.limit));
         const query = params.toString();
-        return await apiFetch<any[]>(`/api/transactions${query ? `?${query}` : ""}`);
+        return await apiFetch<Record<string, unknown>[]>(`/api/transactions${query ? `?${query}` : ""}`);
     } catch (error) {
         console.error("Failed to fetch transactions:", error);
         return [];
@@ -61,7 +63,7 @@ export async function getBankTransactions(limit = 100) {
             page: "1",
             pageSize: String(limit),
         });
-        const response = await apiFetch<{ success: boolean; data: any[]; meta?: any; error?: string }>(
+        const response = await apiFetch<ApiResponse<BankTransaction[]>>(
             `/api/transactions/drafts?${params.toString()}`
         );
         if (!response?.success) {
@@ -76,7 +78,7 @@ export async function getBankTransactions(limit = 100) {
 
 export async function getTransaction(id: string) {
     try {
-        return await apiFetch(`/api/transactions/${id}`);
+        return await apiFetch<Record<string, unknown>>(`/api/transactions/${id}`);
     } catch (error) {
         console.error("Failed to fetch transaction:", error);
         return null;
@@ -94,7 +96,7 @@ export async function updateTransaction(id: string, data: TransactionFormData) {
         return { success: true };
     } catch (error) {
         console.error("Failed to update transaction:", error);
-        return { success: false, error: "Failed to update transaction" };
+        return { success: false, error: getErrorMessage(error, "Failed to update transaction") };
     }
 }
 
@@ -105,6 +107,6 @@ export async function deleteTransaction(id: string) {
         return { success: true };
     } catch (error) {
         console.error("Failed to delete transaction:", error);
-        return { success: false, error: "Failed to delete transaction" };
+        return { success: false, error: getErrorMessage(error, "Failed to delete transaction") };
     }
 }

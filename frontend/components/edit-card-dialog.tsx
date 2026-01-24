@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,8 +20,10 @@ import { getCardTypes } from "@/app/actions/card-type-actions";
 import { getBanks } from "@/app/actions/bank-actions";
 import { createCardCredential } from "@/app/actions/credential-actions";
 import { apiFetch } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 import { decryptPayload, encryptPayload, passphraseMarkerExists } from "@/lib/vault";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Bank, CardType } from "@/lib/types";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -69,6 +71,10 @@ type CardSensitiveData = {
     statementPassword?: string;
 };
 
+type CredentialRecord = {
+    encryptedPayload?: string | null;
+};
+
 export function EditCardDialog({ card }: EditCardDialogProps) {
     const [open, setOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
@@ -78,8 +84,8 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
     const [secureUnlocked, setSecureUnlocked] = useState(false);
     const [secureError, setSecureError] = useState<string | null>(null);
     const [secureData, setSecureData] = useState<CardSensitiveData>({});
-    const [cardTypes, setCardTypes] = useState<any[]>([]);
-    const [banks, setBanks] = useState<any[]>([]);
+    const [cardTypes, setCardTypes] = useState<CardType[]>([]);
+    const [banks, setBanks] = useState<Bank[]>([]);
     const [selectedCardType, setSelectedCardType] = useState<string>(card.cardTypeId || "");
     const [selectedBank, setSelectedBank] = useState<string>("");
     const [formData, setFormData] = useState({
@@ -92,34 +98,41 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
         color: card.color,
     });
 
-    useEffect(() => {
-        if (open) {
-            getCardTypes().then(setCardTypes);
-            getBanks().then((banksData) => {
-                setBanks(banksData);
-                // Find the bank ID that matches the card's bank name
-                const matchingBank = banksData.find(b => b.name === card.bank);
-                if (matchingBank) {
-                    setSelectedBank(matchingBank.id);
-                }
-            });
-            setSelectedCardType(card.cardTypeId || "");
-            setFormData({
-                name: card.name,
-                last4: card.last4,
-                limit: card.limit.toString(),
-                balance: (card.balance || 0).toString(),
-                cutoffDate: card.cutoffDate.toString(),
-                dueDate: card.dueDate.toString(),
-                color: card.color,
-            });
-            setPassphraseReady(passphraseMarkerExists());
-            setPassphrase("");
-            setSecureUnlocked(false);
-            setSecureError(null);
-            setSecureData({});
+    const loadReferenceData = async () => {
+        const [cardTypeData, bankData] = await Promise.all([getCardTypes(), getBanks()]);
+        setCardTypes(cardTypeData);
+        setBanks(bankData);
+        const matchingBank = bankData.find((bank) => bank.name === card.bank);
+        if (matchingBank) {
+            setSelectedBank(matchingBank.id);
         }
-    }, [open, card]);
+    };
+
+    const resetFormState = () => {
+        setSelectedCardType(card.cardTypeId || "");
+        setFormData({
+            name: card.name,
+            last4: card.last4,
+            limit: card.limit.toString(),
+            balance: (card.balance || 0).toString(),
+            cutoffDate: card.cutoffDate.toString(),
+            dueDate: card.dueDate.toString(),
+            color: card.color,
+        });
+        setPassphraseReady(passphraseMarkerExists());
+        setPassphrase("");
+        setSecureUnlocked(false);
+        setSecureError(null);
+        setSecureData({});
+    };
+
+    const handleOpenChange = (nextOpen: boolean) => {
+        setOpen(nextOpen);
+        if (nextOpen) {
+            void loadReferenceData();
+            resetFormState();
+        }
+    };
 
     const handleUnlock = async () => {
         setSecureError(null);
@@ -132,7 +145,7 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
             return;
         }
         try {
-            const payloads = await apiFetch<any[]>(
+            const payloads = await apiFetch<CredentialRecord[]>(
                 `/api/credentials/cards?cardId=${encodeURIComponent(card.id)}&includePayload=true`
             );
             const payload = payloads?.[0]?.encryptedPayload;
@@ -161,8 +174,8 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
                 });
             }
             setSecureUnlocked(true);
-        } catch (error: any) {
-            setSecureError(error.message || "Failed to decrypt sensitive fields.");
+        } catch (error) {
+            setSecureError(getErrorMessage(error, "Failed to decrypt sensitive fields."));
             setSecureUnlocked(false);
         }
     };
@@ -172,7 +185,7 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
         setLoading(true);
         setSecureError(null);
 
-        const selectedBankData = banks.find(b => b.id === selectedBank);
+        const selectedBankData = banks.find((bank) => bank.id === selectedBank);
         const bankName = selectedBankData?.name || card.bank;
 
         const data: CardFormData = {
@@ -199,7 +212,7 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
 
         if (!result.success) {
             setLoading(false);
-            setSecureError("Failed to update card");
+            setSecureError(result.error || "Failed to update card");
             return;
         }
 
@@ -210,8 +223,8 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
                     label: secureData.label || card.name,
                 });
                 await createCardCredential(card.id, payload, secureData.label || card.name);
-            } catch (error: any) {
-                setSecureError(error.message || "Card saved, but sensitive fields could not be updated.");
+            } catch (error) {
+                setSecureError(getErrorMessage(error, "Card saved, but sensitive fields could not be updated."));
                 setLoading(false);
                 return;
             }
@@ -236,8 +249,8 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
 
     return (
         <>
-            <Dialog open={open} onOpenChange={setOpen}>
-                <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+            <Dialog open={open} onOpenChange={handleOpenChange}>
+                <Button variant="outline" size="sm" onClick={() => handleOpenChange(true)}>
                     <Eye className="h-4 w-4 mr-2" />
                     View
                 </Button>

@@ -5,6 +5,7 @@ import { getCards } from "@/app/actions/card-actions"
 import { getCategories } from "@/app/actions/category-actions"
 import { getBankTransactions } from "@/app/actions/transaction-actions"
 import { getBankAccounts } from "@/app/actions/bank-actions"
+import { BankAccount, BankTransaction, Card, Category } from "@/lib/types"
 
 export const metadata: Metadata = {
     title: "Balance Tracking - CardSense",
@@ -12,13 +13,13 @@ export const metadata: Metadata = {
 }
 
 export default async function BalancesPage() {
-    const cards = await getCards();
-    const categories = await getCategories();
+    const cards: Card[] = await getCards();
+    const categories: Category[] = await getCategories();
     const [transactions, bankAccounts] = await Promise.all([
         getBankTransactions(1000),
         getBankAccounts(),
     ]);
-    const mapped = transactions.map((tx: any) => ({
+    const mapped = (transactions as BankTransaction[]).map((tx) => ({
         id: tx.id,
         cardId: null,
         bankAccountId: tx.accountId || null,
@@ -49,7 +50,7 @@ export default async function BalancesPage() {
             <div className="flex-1">
                     <BalanceDashboard 
                         cards={cards} 
-                        accounts={bankAccounts}
+                        accounts={bankAccounts as BankAccount[]}
                         categories={categories} 
                         initialTransactions={mapped}
                     />

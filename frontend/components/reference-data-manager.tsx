@@ -28,6 +28,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Bank, CardType, Category, SubCategory } from "@/lib/types"
 
 type DataType = "cardTypes" | "banks" | "categories" | "subCategories";
 
@@ -43,9 +44,9 @@ interface ListItem {
 
 export function ReferenceDataManager() {
     const router = useRouter();
-    const [cardTypes, setCardTypes] = useState<any[]>([]);
-    const [banks, setBanks] = useState<any[]>([]);
-    const [categories, setCategories] = useState<any[]>([]);
+    const [cardTypes, setCardTypes] = useState<CardType[]>([]);
+    const [banks, setBanks] = useState<Bank[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -56,10 +57,6 @@ export function ReferenceDataManager() {
     const [newSubCategory, setNewSubCategory] = useState<Record<string, string>>({});
     const [editingSub, setEditingSub] = useState<{ id: string; name: string } | null>(null);
     const [subLoading, setSubLoading] = useState(false);
-
-    useEffect(() => {
-        loadData();
-    }, []);
 
     const loadData = async () => {
         setLoading(true);
@@ -73,6 +70,10 @@ export function ReferenceDataManager() {
         setCategories(categoriesData);
         setLoading(false);
     };
+
+    useEffect(() => {
+        void loadData();
+    }, []);
 
     const handleAddNew = (type: DataType) => {
         setEditingItem(null);
@@ -385,7 +386,7 @@ export function ReferenceDataManager() {
                                     <div className="space-y-1">
                                         <div className="text-xs font-medium text-muted-foreground">Sub-categories:</div>
                                         <div className="flex flex-wrap gap-0.5 sm:gap-1">
-                                            {category.subCategories?.map((sub: any) => (
+                                            {category.subCategories?.map((sub: SubCategory) => (
                                                 <span
                                                     key={sub.id}
                                                     className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-secondary rounded text-xs"

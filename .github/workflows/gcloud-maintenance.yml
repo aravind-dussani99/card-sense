@@ -35,7 +35,8 @@ env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   REGION: ${{ vars.GCP_REGION }}
   SQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE }}
-  SQL_DB: ${{ vars.CLOUDSQL_DB }}
+  SQL_INSTANCE_CONNECTION: ${{ vars.CLOUDSQL_INSTANCE_CONNECTION }}
+  SQL_DB: ${{ vars.CLOUDSQL_DB_DEV }}
   SQL_USER: ${{ vars.CLOUDSQL_USER }}
   DATABASE_URL_DEV: ${{ secrets.DATABASE_URL_DEV }}
   DATABASE_URL_PROD: ${{ secrets.DATABASE_URL_PROD }}
@@ -50,8 +51,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.LOGITRACK_CLOUD_SQL_SA }}
-          service_account: ${{ vars.LOGITRACK_CLOUD_SQL_SA_SA }}
+          credentials_json: ${{ secrets.CARD_SENSE_SA_KEY }}
+          service_account: ${{ vars.CARD_SENSE_SA }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -59,22 +60,38 @@ jobs:
       - name: Create Cloud SQL instance
         if: ${{ inputs.create_sql_instance }}
         run: |
-          if ! gcloud sql instances describe "${SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
-            gcloud sql instances create "${SQL_INSTANCE}" \
+          INSTANCE_NAME="${SQL_INSTANCE}"
+          if [ -z "${INSTANCE_NAME}" ] && [ -n "${SQL_INSTANCE_CONNECTION}" ]; then
+            INSTANCE_NAME="${SQL_INSTANCE_CONNECTION##*:}"
+          fi
+          if [ -z "${INSTANCE_NAME}" ]; then
+            echo "CLOUDSQL_INSTANCE_CONNECTION or CLOUDSQL_INSTANCE is required" >&2
+            exit 1
+          fi
+          if ! gcloud sql instances describe "${INSTANCE_NAME}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+            gcloud sql instances create "${INSTANCE_NAME}" \
               --project "${PROJECT_ID}" \
               --database-version=POSTGRES_15 \
               --region "${REGION}" \
               --cpu=2 \
               --memory=4GB
           else
-            echo "Cloud SQL instance ${SQL_INSTANCE} already exists"
+            echo "Cloud SQL instance ${INSTANCE_NAME} already exists"
           fi
 
       - name: Create Cloud SQL database
         if: ${{ inputs.create_sql_db }}
         run: |
-          if ! gcloud sql databases describe "${SQL_DB}" --instance "${SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
-            gcloud sql databases create "${SQL_DB}" --instance "${SQL_INSTANCE}" --project "${PROJECT_ID}"
+          INSTANCE_NAME="${SQL_INSTANCE}"
+          if [ -z "${INSTANCE_NAME}" ] && [ -n "${SQL_INSTANCE_CONNECTION}" ]; then
+            INSTANCE_NAME="${SQL_INSTANCE_CONNECTION##*:}"
+          fi
+          if [ -z "${INSTANCE_NAME}" ]; then
+            echo "CLOUDSQL_INSTANCE_CONNECTION or CLOUDSQL_INSTANCE is required" >&2
+            exit 1
+          fi
+          if ! gcloud sql databases describe "${SQL_DB}" --instance "${INSTANCE_NAME}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+            gcloud sql databases create "${SQL_DB}" --instance "${INSTANCE_NAME}" --project "${PROJECT_ID}"
           else
             echo "Database ${SQL_DB} already exists"
           fi
@@ -88,8 +105,16 @@ jobs:
             echo "CLOUDSQL_PASSWORD secret is required" >&2
             exit 1
           fi
-          if ! gcloud sql users list --instance "${SQL_INSTANCE}" --project "${PROJECT_ID}" --format="value(name)" | grep -q "^${SQL_USER}$"; then
-            gcloud sql users create "${SQL_USER}" --instance "${SQL_INSTANCE}" --project "${PROJECT_ID}" --password "${SQL_PASSWORD}"
+          INSTANCE_NAME="${SQL_INSTANCE}"
+          if [ -z "${INSTANCE_NAME}" ] && [ -n "${SQL_INSTANCE_CONNECTION}" ]; then
+            INSTANCE_NAME="${SQL_INSTANCE_CONNECTION##*:}"
+          fi
+          if [ -z "${INSTANCE_NAME}" ]; then
+            echo "CLOUDSQL_INSTANCE_CONNECTION or CLOUDSQL_INSTANCE is required" >&2
+            exit 1
+          fi
+          if ! gcloud sql users list --instance "${INSTANCE_NAME}" --project "${PROJECT_ID}" --format="value(name)" | grep -q "^${SQL_USER}$"; then
+            gcloud sql users create "${SQL_USER}" --instance "${INSTANCE_NAME}" --project "${PROJECT_ID}" --password "${SQL_PASSWORD}"
           else
             echo "User ${SQL_USER} already exists"
           fi

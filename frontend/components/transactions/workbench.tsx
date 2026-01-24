@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, AlertCircle, CheckCircle2, Eye, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +33,7 @@ type DraftRecord = {
     merchantTo?: string | null;
     descriptionVia?: string | null;
     merchant?: string | null;
+    description?: string | null;
     subCategory?: string | null;
     amount: number;
     currency?: string | null;
@@ -150,13 +151,13 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
     }, [syncMode, selectedSources.length]);
 
 
-    const buildAccountLabel = (item: DraftRecord) => {
+    const buildAccountLabel = useCallback((item: DraftRecord) => {
         const name = item.account?.name || item.account?.type || "Account";
         const helper = item.account?.mask ? `••${item.account.mask}` : item.account?.type || "";
         return `${name}${helper ? ` (${helper})` : ""}`;
-    };
+    }, []);
 
-    const mapDraftFromApi = (draft: DraftRecord): DraftRecord => {
+    const mapDraftFromApi = useCallback((draft: DraftRecord): DraftRecord => {
         let extra: { remarks?: string | null; subCategory?: string | null } = {};
         if (draft.raw) {
             try {
@@ -194,8 +195,8 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         return {
             ...draft,
             date: draft.date,
-            merchantTo: draft.merchantTo || (draft as any).merchant || draft.descriptionVia || null,
-            descriptionVia: draft.descriptionVia || (draft as any).description || (draft as any).merchant || null,
+            merchantTo: draft.merchantTo || draft.merchant || draft.descriptionVia || null,
+            descriptionVia: draft.descriptionVia || draft.description || draft.merchant || null,
             remarks: draft.meta?.remarks ?? draft.remarks ?? extra.remarks ?? null,
             subCategory: draft.meta?.subCategory ?? draft.subCategory ?? extra.subCategory ?? null,
             direction: draft.direction || (draft.amount < 0 ? "debit" : "credit"),
@@ -208,16 +209,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             attachments,
             comments: draft.meta?.comments ?? null,
         };
-    };
-
-    useEffect(() => {
-        setDrafts(initialDrafts.map(mapDraftFromApi));
-        setMeta(initialMeta);
-    }, [initialDrafts, initialMeta]);
-
-    useEffect(() => {
-        void fetchDrafts(1, PAGE_SIZE);
-    }, []);
+    }, [buildAccountLabel]);
 
     const totalPages = Math.max(1, Math.ceil(meta.total / meta.pageSize));
 
@@ -228,6 +220,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         let end = Math.min(totalPages, start + maxButtons - 1);
         if (end - start < maxButtons - 1) {
             start = Math.max(1, end - maxButtons + 1);
+            end = Math.min(totalPages, start + maxButtons - 1);
         }
 
         const addButton = (pageNumber: number, label?: string) => {
@@ -294,7 +287,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
 
     const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : "Something went wrong");
 
-    const fetchDrafts = async (
+    const fetchDrafts = useCallback(async (
         page: number,
         desiredPageSize = PAGE_SIZE,
         accountIdOverride?: string,
@@ -341,7 +334,16 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         } finally {
             setPageLoading(false);
         }
-    };
+    }, [filterAccountId, filterCategoryId, filterFromDate, filterToDate, mapDraftFromApi, searchTerm]);
+
+    useEffect(() => {
+        setDrafts(initialDrafts.map(mapDraftFromApi));
+        setMeta(initialMeta);
+    }, [initialDrafts, initialMeta, mapDraftFromApi]);
+
+    useEffect(() => {
+        void fetchDrafts(1, PAGE_SIZE);
+    }, [fetchDrafts]);
 
     const applyFilters = () => {
         void fetchDrafts(1, PAGE_SIZE);

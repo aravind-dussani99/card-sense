@@ -1,10 +1,12 @@
 "use server";
 
 import { apiFetch } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
+import { ApiResponse, Category, SubCategory } from "@/lib/types";
 
 export async function getCategories() {
     try {
-        return await apiFetch<any[]>("/api/categories");
+        return await apiFetch<Category[]>("/api/categories");
     } catch (error) {
         console.error("Failed to fetch categories:", error);
         return [];
@@ -13,25 +15,25 @@ export async function getCategories() {
 
 export async function addCategory(name: string, icon?: string, color?: string) {
     try {
-        return await apiFetch("/api/categories", {
+        return await apiFetch<ApiResponse<Category>>("/api/categories", {
             method: "POST",
             body: JSON.stringify({ name, icon, color }),
         });
-    } catch (error: any) {
+    } catch (error) {
         console.error("Failed to add category:", error);
-        return { success: false, error: error.message || "Failed to add category" };
+        return { success: false, error: getErrorMessage(error, "Failed to add category") };
     }
 }
 
 export async function updateCategory(id: string, name: string, icon?: string, color?: string) {
     try {
-        return await apiFetch(`/api/categories/${id}`, {
+        return await apiFetch<ApiResponse<Category>>(`/api/categories/${id}`, {
             method: "PUT",
             body: JSON.stringify({ name, icon, color }),
         });
-    } catch (error: any) {
+    } catch (error) {
         console.error("Failed to update category:", error);
-        return { success: false, error: error.message || "Failed to update category" };
+        return { success: false, error: getErrorMessage(error, "Failed to update category") };
     }
 }
 
@@ -39,33 +41,33 @@ export async function deleteCategory(id: string) {
     try {
         await apiFetch(`/api/categories/${id}`, { method: "DELETE", skipJson: true });
         return { success: true };
-    } catch (error: any) {
+    } catch (error) {
         console.error("Failed to delete category:", error);
-        return { success: false, error: error.message || "Failed to delete category" };
+        return { success: false, error: getErrorMessage(error, "Failed to delete category") };
     }
 }
 
 export async function addSubCategory(categoryId: string, name: string) {
     try {
-        return await apiFetch(`/api/categories/${categoryId}/subcategories`, {
+        return await apiFetch<ApiResponse<SubCategory>>(`/api/categories/${categoryId}/subcategories`, {
             method: "POST",
             body: JSON.stringify({ name }),
         });
-    } catch (error: any) {
+    } catch (error) {
         console.error("Failed to add sub-category:", error);
-        return { success: false, error: error.message || "Failed to add sub-category" };
+        return { success: false, error: getErrorMessage(error, "Failed to add sub-category") };
     }
 }
 
 export async function updateSubCategory(id: string, name: string) {
     try {
-        return await apiFetch(`/api/subcategories/${id}`, {
+        return await apiFetch<ApiResponse<SubCategory>>(`/api/subcategories/${id}`, {
             method: "PUT",
             body: JSON.stringify({ name }),
         });
-    } catch (error: any) {
+    } catch (error) {
         console.error("Failed to update sub-category:", error);
-        return { success: false, error: error.message || "Failed to update sub-category" };
+        return { success: false, error: getErrorMessage(error, "Failed to update sub-category") };
     }
 }
 
@@ -73,8 +75,8 @@ export async function deleteSubCategory(id: string) {
     try {
         await apiFetch(`/api/subcategories/${id}`, { method: "DELETE", skipJson: true });
         return { success: true };
-    } catch (error: any) {
+    } catch (error) {
         console.error("Failed to delete sub-category:", error);
-        return { success: false, error: error.message || "Failed to delete sub-category" };
+        return { success: false, error: getErrorMessage(error, "Failed to delete sub-category") };
     }
 }

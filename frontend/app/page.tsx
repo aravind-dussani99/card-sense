@@ -5,10 +5,10 @@ import { CreditCard, DollarSign, TrendingUp, Activity } from "lucide-react"
 import { BankTransactionList } from "@/components/bank-transaction-list"
 import { AIInsights } from "@/components/ai-insights"
 import { getCards } from "@/app/actions/card-actions"
-import { getCategories } from "@/app/actions/category-actions"
 import { getSpendingByMerchant } from "@/app/actions/analytics-actions"
 import { MerchantSpendChart } from "@/components/merchant-spend-chart"
 import { getBankTransactions } from "@/app/actions/transaction-actions"
+import { BankTransaction, Card as CardModel } from "@/lib/types"
 
 export const metadata: Metadata = {
   title: "Dashboard - CardSense",
@@ -16,10 +16,9 @@ export const metadata: Metadata = {
 }
 
 export default async function DashboardPage() {
-  const cards: any[] = await getCards();
-  const categories = await getCategories();
+  const cards: CardModel[] = await getCards();
   const merchantData = await getSpendingByMerchant();
-  const recentTransactions = await getBankTransactions(10);
+  const recentTransactions: BankTransaction[] = await getBankTransactions(10);
 
   const totalBalance = cards.reduce((acc, card) => acc + card.balance, 0);
   const activeCards = cards.length;
@@ -104,7 +103,7 @@ export default async function DashboardPage() {
             </CardHeader>
             <CardContent>
               <BankTransactionList
-                transactions={recentTransactions.map((tx: any) => ({
+                transactions={recentTransactions.map((tx: BankTransaction) => ({
                   id: tx.id,
                   merchant: tx.merchant || tx.descriptionVia || "Unknown",
                   descriptionVia: tx.descriptionVia || tx.merchant || "",

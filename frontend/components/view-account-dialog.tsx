@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Eye } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 import { decryptPayload, encryptPayload, passphraseMarkerExists } from "@/lib/vault";
 import { updateBankAccount } from "@/app/actions/bank-actions";
 import { createBankAccountCredential } from "@/app/actions/credential-actions";
@@ -43,6 +44,10 @@ type AccountCredentials = {
   memorableInfo?: string;
   authDetails?: string;
   statementPassword?: string;
+};
+
+type CredentialRecord = {
+  encryptedPayload?: string | null;
 };
 
 export function ViewAccountDialog({ account }: { account: BankAccountDisplay }) {
@@ -102,7 +107,7 @@ export function ViewAccountDialog({ account }: { account: BankAccountDisplay }) 
       return;
     }
     try {
-      const payloads = await apiFetch<any[]>(
+      const payloads = await apiFetch<CredentialRecord[]>(
         `/api/credentials/accounts?bankAccountId=${encodeURIComponent(account.id)}&includePayload=true`
       );
       const payload = payloads?.[0]?.encryptedPayload;
@@ -120,8 +125,8 @@ export function ViewAccountDialog({ account }: { account: BankAccountDisplay }) 
         });
       }
       setSecureUnlocked(true);
-    } catch (error: any) {
-      setSecureError(error.message || "Failed to decrypt sensitive fields.");
+    } catch (error) {
+      setSecureError(getErrorMessage(error, "Failed to decrypt sensitive fields."));
       setSecureUnlocked(false);
     }
   };
@@ -153,8 +158,8 @@ export function ViewAccountDialog({ account }: { account: BankAccountDisplay }) 
       }
       setOpen(false);
       window.location.reload();
-    } catch (error: any) {
-      setSecureError(error.message || "Failed to save account.");
+    } catch (error) {
+      setSecureError(getErrorMessage(error, "Failed to save account."));
     } finally {
       setSaving(false);
     }
