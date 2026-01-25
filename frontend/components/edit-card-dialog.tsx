@@ -55,6 +55,7 @@ interface EditCardDialogProps {
         color: string;
         statementPassword?: string | null;
     };
+    triggerVariant?: "default" | "icon";
 }
 
 type CardSensitiveData = {
@@ -75,7 +76,7 @@ type CredentialRecord = {
     encryptedPayload?: string | null;
 };
 
-export function EditCardDialog({ card }: EditCardDialogProps) {
+export function EditCardDialog({ card, triggerVariant = "default" }: EditCardDialogProps) {
     const [open, setOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -250,10 +251,22 @@ export function EditCardDialog({ card }: EditCardDialogProps) {
     return (
         <>
             <Dialog open={open} onOpenChange={handleOpenChange}>
-                <Button variant="outline" size="sm" onClick={() => handleOpenChange(true)}>
-                    <Eye className="h-4 w-4 mr-2" />
-                    View
-                </Button>
+                {triggerVariant === "icon" ? (
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 rounded-full"
+                        aria-label="View card"
+                        onClick={() => handleOpenChange(true)}
+                    >
+                        <Eye className="h-4 w-4" />
+                    </Button>
+                ) : (
+                    <Button variant="outline" size="sm" onClick={() => handleOpenChange(true)}>
+                        <Eye className="h-4 w-4 mr-2" />
+                        View
+                    </Button>
+                )}
                 <DialogContent className="sm:max-w-[600px]">
                     <DialogHeader>
                         <DialogTitle>View & Edit Card</DialogTitle>

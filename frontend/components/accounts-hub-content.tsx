@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { AddAccountDialog } from "@/components/add-account-dialog";
 import { AddCardDialog } from "@/components/add-card-dialog";
 import { BankAccountsList } from "@/components/bank-accounts-list";
@@ -28,6 +27,17 @@ const isOverdraft = (account: BankAccount) => {
     return type.includes("overdraft") || name.includes("overdraft");
 };
 
+const getSectionFromHash = (): VisibleSection => {
+    if (typeof window === "undefined") {
+        return "all";
+    }
+    const hash = window.location.hash;
+    if (hash === "#bank-accounts") return "bank";
+    if (hash === "#overdraft-accounts") return "overdraft";
+    if (hash === "#credit-cards") return "credit";
+    return "all";
+};
+
 const PlaceholderTile = ({ label }: { label: string }) => (
     <div className="rounded-xl border border-dashed border-muted-foreground/30 bg-muted/20 p-5 text-muted-foreground/60 backdrop-blur-sm">
         <div className="text-xs uppercase tracking-wide">Placeholder</div>
@@ -38,31 +48,43 @@ const PlaceholderTile = ({ label }: { label: string }) => (
 );
 
 export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentProps) {
-    const pathname = usePathname();
-    const [visibleSection, setVisibleSection] = useState<VisibleSection>("all");
+    const overdraftAccounts = useMemo(() => bankAccounts.filter(isOverdraft), [bankAccounts]);
+    const standardAccounts = useMemo(() => bankAccounts.filter((acct) => !isOverdraft(acct)), [bankAccounts]);
+    const hasBankAccounts = standardAccounts.length > 0;
+    const hasOverdraftAccounts = overdraftAccounts.length > 0;
+    const hasCreditCards = cards.length > 0;
+    const initialSection = getSectionFromHash();
 
-    useEffect(() => {
-        const hash = window.location.hash;
-        if (hash === "#bank-accounts") setVisibleSection("bank");
-        else if (hash === "#overdraft-accounts") setVisibleSection("overdraft");
-        else if (hash === "#credit-cards") setVisibleSection("credit");
-        else setVisibleSection("all");
-    }, [pathname]);
+    const [showBank, setShowBank] = useState(() => {
+        if (initialSection === "bank") return hasBankAccounts;
+        if (initialSection !== "all") return false;
+        return hasBankAccounts;
+    });
+    const [showOverdraft, setShowOverdraft] = useState(() => {
+        if (initialSection === "overdraft") return hasOverdraftAccounts;
+        if (initialSection !== "all") return false;
+        return !hasBankAccounts && hasOverdraftAccounts;
+    });
+    const [showCredit, setShowCredit] = useState(() => {
+        if (initialSection === "credit") return hasCreditCards;
+        if (initialSection !== "all") return false;
+        return !hasBankAccounts && hasCreditCards;
+    });
 
     useEffect(() => {
         const handleHashChange = () => {
-            const hash = window.location.hash;
-            if (hash === "#bank-accounts") setVisibleSection("bank");
-            else if (hash === "#overdraft-accounts") setVisibleSection("overdraft");
-            else if (hash === "#credit-cards") setVisibleSection("credit");
-            else setVisibleSection("all");
+            const section = getSectionFromHash();
+            if (section === "bank" && hasBankAccounts) {
+                setShowBank(true);
+            } else if (section === "overdraft" && hasOverdraftAccounts) {
+                setShowOverdraft(true);
+            } else if (section === "credit" && hasCreditCards) {
+                setShowCredit(true);
+            }
         };
         window.addEventListener("hashchange", handleHashChange);
         return () => window.removeEventListener("hashchange", handleHashChange);
-    }, []);
-
-    const overdraftAccounts = useMemo(() => bankAccounts.filter(isOverdraft), [bankAccounts]);
-    const standardAccounts = useMemo(() => bankAccounts.filter((acct) => !isOverdraft(acct)), [bankAccounts]);
+    }, [hasBankAccounts, hasOverdraftAccounts, hasCreditCards]);
 
     const bankAvailable = standardAccounts.reduce(
         (sum, acct) => sum + toNumber(acct.availableBalance ?? acct.balance),
@@ -78,9 +100,10 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
     const creditUsed = cards.reduce((sum, card) => sum + toNumber(card.balance), 0);
     const creditAvailable = Math.max(0, creditLimit - creditUsed);
 
-    const showBank = visibleSection === "all" || visibleSection === "bank";
-    const showOverdraft = visibleSection === "all" || visibleSection === "overdraft";
-    const showCredit = visibleSection === "all" || visibleSection === "credit";
+    const showBankSection = showBank && hasBankAccounts;
+    const showOverdraftSection = showOverdraft && hasOverdraftAccounts;
+    const showCreditSection = showCredit && hasCreditCards;
+    const anySectionVisible = showBankSection || showOverdraftSection || showCreditSection;
 
     return (
         <div className="flex-1 space-y-4 p-8 pt-6">
@@ -97,103 +120,108 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
                 <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => setVisibleSection("bank")}
+                    onClick={() => setShowBank(true)}
                     onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") setVisibleSection("bank");
+                        if (event.key === "Enter" || event.key === " ") setShowBank(true);
                     }}
                     className="outline-none"
                 >
                     <Card className="cursor-pointer transition-colors hover:border-primary/40">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Bank Accounts</CardTitle>
-                        <CardDescription>Available</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">£{bankAvailable.toFixed(2)}</div>
-                        <p className="text-xs text-muted-foreground">Across all bank accounts</p>
-                    </CardContent>
+                        <CardHeader className="pb-1 pt-3">
+                            <CardTitle className="text-xs font-medium uppercase tracking-wide">Bank Accounts</CardTitle>
+                            <CardDescription className="text-xs">Available</CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-0 pb-3">
+                            <div className="text-xl font-semibold">£{bankAvailable.toFixed(2)}</div>
+                            <p className="text-xs text-muted-foreground">Across all bank accounts</p>
+                        </CardContent>
                     </Card>
                 </div>
                 <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => setVisibleSection("overdraft")}
+                    onClick={() => setShowOverdraft(true)}
                     onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") setVisibleSection("overdraft");
+                        if (event.key === "Enter" || event.key === " ") setShowOverdraft(true);
                     }}
                     className="outline-none"
                 >
                     <Card className="cursor-pointer transition-colors hover:border-primary/40">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Overdraft</CardTitle>
-                        <CardDescription>Used / Available / Limit</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">£{overdraftUsed.toFixed(2)}</div>
-                        <p className="text-xs text-muted-foreground">
-                            £{overdraftAvailable.toFixed(2)} avail · £{overdraftLimit.toFixed(2)} limit
-                        </p>
-                    </CardContent>
+                        <CardHeader className="pb-1 pt-3">
+                            <CardTitle className="text-xs font-medium uppercase tracking-wide">Overdraft</CardTitle>
+                            <CardDescription className="text-xs">Used / Available / Limit</CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-0 pb-3">
+                            <div className="text-xl font-semibold">£{overdraftUsed.toFixed(2)}</div>
+                            <p className="text-xs text-muted-foreground">
+                                £{overdraftAvailable.toFixed(2)} avail · £{overdraftLimit.toFixed(2)} limit
+                            </p>
+                        </CardContent>
                     </Card>
                 </div>
                 <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => setVisibleSection("credit")}
+                    onClick={() => setShowCredit(true)}
                     onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") setVisibleSection("credit");
+                        if (event.key === "Enter" || event.key === " ") setShowCredit(true);
                     }}
                     className="outline-none"
                 >
                     <Card className="cursor-pointer transition-colors hover:border-primary/40">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Credit Cards</CardTitle>
-                        <CardDescription>Used / Available / Limit</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">£{creditUsed.toFixed(2)}</div>
-                        <p className="text-xs text-muted-foreground">
-                            £{creditAvailable.toFixed(2)} avail · £{creditLimit.toFixed(2)} limit
-                        </p>
-                    </CardContent>
+                        <CardHeader className="pb-1 pt-3">
+                            <CardTitle className="text-xs font-medium uppercase tracking-wide">Credit Cards</CardTitle>
+                            <CardDescription className="text-xs">Used / Available / Limit</CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-0 pb-3">
+                            <div className="text-xl font-semibold">£{creditUsed.toFixed(2)}</div>
+                            <p className="text-xs text-muted-foreground">
+                                £{creditAvailable.toFixed(2)} avail · £{creditLimit.toFixed(2)} limit
+                            </p>
+                        </CardContent>
                     </Card>
                 </div>
                 <Link href="/rewards" className="outline-none">
                     <Card className="cursor-pointer transition-colors hover:border-primary/40">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Total Rewards</CardTitle>
-                        <CardDescription>Rewards summary</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">0 pts</div>
-                        <p className="text-xs text-muted-foreground">Redeemable points</p>
-                    </CardContent>
+                        <CardHeader className="pb-1 pt-3">
+                            <CardTitle className="text-xs font-medium uppercase tracking-wide">Total Rewards</CardTitle>
+                            <CardDescription className="text-xs">Rewards summary</CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-0 pb-3">
+                            <div className="text-xl font-semibold">0 pts</div>
+                            <p className="text-xs text-muted-foreground">Redeemable points</p>
+                        </CardContent>
                     </Card>
                 </Link>
             </div>
 
-            {visibleSection !== "all" && (
-                <div>
-                    <Button variant="outline" onClick={() => setVisibleSection("all")}>
-                        Show all sections
-                    </Button>
-                </div>
+            <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" disabled={!hasBankAccounts} onClick={() => setShowBank((prev) => !prev)}>
+                    {showBankSection ? "Hide accounts section" : "Show accounts section"}
+                </Button>
+                <Button variant="outline" size="sm" disabled={!hasOverdraftAccounts} onClick={() => setShowOverdraft((prev) => !prev)}>
+                    {showOverdraftSection ? "Hide overdrafts section" : "Show overdrafts section"}
+                </Button>
+                <Button variant="outline" size="sm" disabled={!hasCreditCards} onClick={() => setShowCredit((prev) => !prev)}>
+                    {showCreditSection ? "Hide credit cards section" : "Show credit cards section"}
+                </Button>
+            </div>
+
+            {!anySectionVisible && (
+                <p className="text-sm text-muted-foreground">No account data yet. Add an account or card to get started.</p>
             )}
 
-            {showBank && (
+            {showBankSection && (
                 <Card id="bank-accounts" className="scroll-mt-24">
                     <CardHeader className="flex flex-row items-center justify-between">
                         <div>
                             <CardTitle>Bank Accounts</CardTitle>
                             <CardDescription>Manual accounts and connected bank accounts.</CardDescription>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => setVisibleSection("bank")}>
-                            Hide other sections
-                        </Button>
                     </CardHeader>
                     <CardContent>
                         {standardAccounts.length === 0 ? (
@@ -205,16 +233,13 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                 </Card>
             )}
 
-            {showOverdraft && (
+            {showOverdraftSection && (
                 <Card id="overdraft-accounts" className="scroll-mt-24">
                     <CardHeader className="flex flex-row items-center justify-between">
                         <div>
                             <CardTitle>Overdraft Accounts</CardTitle>
                             <CardDescription>Overdraft balances and limits grouped here.</CardDescription>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => setVisibleSection("overdraft")}>
-                            Hide other sections
-                        </Button>
                     </CardHeader>
                     <CardContent>
                         {overdraftAccounts.length === 0 ? (
@@ -239,16 +264,13 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                 </Card>
             )}
 
-            {showCredit && (
+            {showCreditSection && (
                 <Card id="credit-cards" className="scroll-mt-24">
                     <CardHeader className="flex flex-row items-center justify-between">
                         <div>
                             <CardTitle>Credit Cards</CardTitle>
                             <CardDescription>Track all credit card balances and limits.</CardDescription>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => setVisibleSection("credit")}>
-                            Hide other sections
-                        </Button>
                     </CardHeader>
                     <CardContent>
                         <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
@@ -259,7 +281,7 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                                     </div>
                                     <CardDisplay card={card} />
                                     <div className="absolute bottom-4 right-4">
-                                        <EditCardDialog card={card} />
+                                        <EditCardDialog card={card} triggerVariant="icon" />
                                     </div>
                                 </div>
                             ))}

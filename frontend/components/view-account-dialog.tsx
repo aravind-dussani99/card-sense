@@ -50,7 +50,13 @@ type CredentialRecord = {
   encryptedPayload?: string | null;
 };
 
-export function ViewAccountDialog({ account }: { account: BankAccountDisplay }) {
+export function ViewAccountDialog({
+  account,
+  triggerVariant = "default",
+}: {
+  account: BankAccountDisplay;
+  triggerVariant?: "default" | "icon";
+}) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [passphraseReady, setPassphraseReady] = useState(false);
@@ -167,10 +173,22 @@ export function ViewAccountDialog({ account }: { account: BankAccountDisplay }) 
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Eye className="h-4 w-4 mr-2" />
-        View
-      </Button>
+      {triggerVariant === "icon" ? (
+        <Button
+          variant="outline"
+          size="icon"
+          className="h-9 w-9 rounded-full"
+          aria-label="View account"
+          onClick={() => setOpen(true)}
+        >
+          <Eye className="h-4 w-4" />
+        </Button>
+      ) : (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Eye className="h-4 w-4 mr-2" />
+          View
+        </Button>
+      )}
       <DialogContent className="sm:max-w-[720px]">
         <DialogHeader>
           <DialogTitle>View & Edit Account</DialogTitle>

@@ -139,9 +139,19 @@ jobs:
           echo "Cloud SQL Proxy did not become ready" >&2
           exit 1
       - name: Check DB connectivity (dev)
-        env:
-          DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/{3}?schema=public', env.CLOUDSQL_USER, secrets.CLOUDSQL_PASSWORD, env.DB_PROXY_PORT, env.CLOUDSQL_DB_DEV) }}
         run: |
+          if [ -z "${CLOUDSQL_PASSWORD}" ]; then
+            echo "CLOUDSQL_PASSWORD is required for PR migrations" >&2
+            exit 1
+          fi
+          ENCODED_PASSWORD=$(python3 - <<'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ.get("CLOUDSQL_PASSWORD", ""), safe=""))
+          PY
+          )
+          DATABASE_URL="postgresql://${CLOUDSQL_USER}:${ENCODED_PASSWORD}@127.0.0.1:${DB_PROXY_PORT}/${CLOUDSQL_DB_DEV}?schema=public"
+          export DATABASE_URL
           if [ -z "${DATABASE_URL}" ]; then
             echo "DATABASE_URL is required for PR migrations" >&2
             exit 1
@@ -188,9 +198,19 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Run Prisma migrations (dev)
         working-directory: backend
-        env:
-          DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/{3}?schema=public', env.CLOUDSQL_USER, secrets.CLOUDSQL_PASSWORD, env.DB_PROXY_PORT, env.CLOUDSQL_DB_DEV) }}
         run: |
+          if [ -z "${CLOUDSQL_PASSWORD}" ]; then
+            echo "CLOUDSQL_PASSWORD is required for PR migrations" >&2
+            exit 1
+          fi
+          ENCODED_PASSWORD=$(python3 - <<'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ.get("CLOUDSQL_PASSWORD", ""), safe=""))
+          PY
+          )
+          DATABASE_URL="postgresql://${CLOUDSQL_USER}:${ENCODED_PASSWORD}@127.0.0.1:${DB_PROXY_PORT}/${CLOUDSQL_DB_DEV}?schema=public"
+          export DATABASE_URL
           if [ -z "${DATABASE_URL}" ]; then
             echo "DATABASE_URL is required for PR migrations" >&2
             exit 1
@@ -312,9 +332,19 @@ jobs:
           echo "Cloud SQL Proxy did not become ready" >&2
           exit 1
       - name: Check DB connectivity (prod)
-        env:
-          DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/{3}?schema=public', env.CLOUDSQL_USER, secrets.CLOUDSQL_PASSWORD, env.DB_PROXY_PORT, env.CLOUDSQL_DB_DEV) }}
         run: |
+          if [ -z "${CLOUDSQL_PASSWORD}" ]; then
+            echo "CLOUDSQL_PASSWORD is required for prod migrations" >&2
+            exit 1
+          fi
+          ENCODED_PASSWORD=$(python3 - <<'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ.get("CLOUDSQL_PASSWORD", ""), safe=""))
+          PY
+          )
+          DATABASE_URL="postgresql://${CLOUDSQL_USER}:${ENCODED_PASSWORD}@127.0.0.1:${DB_PROXY_PORT}/${CLOUDSQL_DB_DEV}?schema=public"
+          export DATABASE_URL
           if [ -z "${DATABASE_URL}" ]; then
             echo "DATABASE_URL is required for prod migrations" >&2
             exit 1
@@ -356,9 +386,19 @@ jobs:
 
       - name: Run Prisma migrations (prod)
         working-directory: backend
-        env:
-          DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/{3}?schema=public', env.CLOUDSQL_USER, secrets.CLOUDSQL_PASSWORD, env.DB_PROXY_PORT, env.CLOUDSQL_DB_DEV) }}
         run: |
+          if [ -z "${CLOUDSQL_PASSWORD}" ]; then
+            echo "CLOUDSQL_PASSWORD is required for prod migrations" >&2
+            exit 1
+          fi
+          ENCODED_PASSWORD=$(python3 - <<'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ.get("CLOUDSQL_PASSWORD", ""), safe=""))
+          PY
+          )
+          DATABASE_URL="postgresql://${CLOUDSQL_USER}:${ENCODED_PASSWORD}@127.0.0.1:${DB_PROXY_PORT}/${CLOUDSQL_DB_DEV}?schema=public"
+          export DATABASE_URL
           if [ -z "${DATABASE_URL}" ]; then
             echo "DATABASE_URL is required for prod migrations" >&2
             exit 1
@@ -432,9 +472,20 @@ jobs:
 
       - name: Deploy Backend to Cloud Run
         env:
-          DATABASE_URL: ${{ format('postgresql://{0}:{1}@localhost:{2}/{3}?schema=public&host=/cloudsql/{4}', env.CLOUDSQL_USER, secrets.CLOUDSQL_PASSWORD, env.DB_PROXY_PORT, env.CLOUDSQL_DB_DEV, env.CLOUDSQL_INSTANCE_CONNECTION) }}
           ADMIN_RESET_TOKEN: ${{ secrets.ADMIN_RESET_TOKEN_PROD }}
         run: |
+          if [ -z "${CLOUDSQL_PASSWORD}" ]; then
+            echo "CLOUDSQL_PASSWORD is required for prod deployments" >&2
+            exit 1
+          fi
+          ENCODED_PASSWORD=$(python3 - <<'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ.get("CLOUDSQL_PASSWORD", ""), safe=""))
+          PY
+          )
+          DATABASE_URL="postgresql://${CLOUDSQL_USER}:${ENCODED_PASSWORD}@localhost:${DB_PROXY_PORT}/${CLOUDSQL_DB_DEV}?schema=public&host=/cloudsql/${CLOUDSQL_INSTANCE_CONNECTION}"
+          export DATABASE_URL
           if [ -z "${DATABASE_URL}" ]; then
             echo "DATABASE_URL is required for prod deployments" >&2
             exit 1
@@ -581,9 +632,20 @@ jobs:
 
       - name: Deploy Backend to Cloud Run (dev)
         env:
-          DATABASE_URL: ${{ format('postgresql://{0}:{1}@localhost:{2}/{3}?schema=public&host=/cloudsql/{4}', env.CLOUDSQL_USER, secrets.CLOUDSQL_PASSWORD, env.DB_PROXY_PORT, env.CLOUDSQL_DB_DEV, env.CLOUDSQL_INSTANCE_CONNECTION) }}
           ADMIN_RESET_TOKEN: ${{ secrets.ADMIN_RESET_TOKEN_DEV }}
         run: |
+          if [ -z "${CLOUDSQL_PASSWORD}" ]; then
+            echo "CLOUDSQL_PASSWORD is required for PR deployments" >&2
+            exit 1
+          fi
+          ENCODED_PASSWORD=$(python3 - <<'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ.get("CLOUDSQL_PASSWORD", ""), safe=""))
+          PY
+          )
+          DATABASE_URL="postgresql://${CLOUDSQL_USER}:${ENCODED_PASSWORD}@localhost:${DB_PROXY_PORT}/${CLOUDSQL_DB_DEV}?schema=public&host=/cloudsql/${CLOUDSQL_INSTANCE_CONNECTION}"
+          export DATABASE_URL
           if [ -z "${DATABASE_URL}" ]; then
             echo "DATABASE_URL is required for PR deployments" >&2
             exit 1

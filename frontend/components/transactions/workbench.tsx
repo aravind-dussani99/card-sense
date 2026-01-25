@@ -635,209 +635,211 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
 
     return (
         <div className="space-y-6">
-            <Card>
-                <CardHeader className="pb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                        <CardTitle>Sync configuration</CardTitle>
-                        <CardDescription>Choose sources and date boundaries. Each sync writes into the new transactions store.</CardDescription>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => setShowSync((prev) => !prev)}>
-                        {showSync ? "Hide sync" : "Show sync"}
-                    </Button>
-                </CardHeader>
-                {showSync && (
+            <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                <Card className="h-full">
+                    <CardHeader className="pb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <CardTitle>Sync new transactions</CardTitle>
+                            <CardDescription>Choose sources and date boundaries. Each sync writes into the new transactions store.</CardDescription>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => setShowSync((prev) => !prev)}>
+                            {showSync ? "Hide sync" : "Show sync"}
+                        </Button>
+                    </CardHeader>
+                    {showSync && (
+                        <CardContent className="space-y-3">
+                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                <div className="space-y-1">
+                                    <Label>Source scope</Label>
+                                    <Select value={syncMode} onValueChange={(value) => isValidMode(value) && setSyncMode(value)}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select scope" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {SYNC_MODES.map((mode) => (
+                                                <SelectItem key={mode.value} value={mode.value}>
+                                                    {mode.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Custom selection</Label>
+                                    <Popover open={sourcePickerOpen} onOpenChange={(open) => syncMode === "custom" && setSourcePickerOpen(open)}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                disabled={syncMode !== "custom"}
+                                                className="w-full justify-between"
+                                            >
+                                                {selectedSources.length === 0
+                                                    ? "Pick specific accounts or cards"
+                                                    : `${selectedSources.length} source${selectedSources.length === 1 ? "" : "s"} selected`}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent align="start" className="w-[320px] space-y-3">
+                                            <div className="text-sm font-medium">Select accounts or cards</div>
+                                            <div className="max-h-60 space-y-2 overflow-y-auto pr-2">
+                                                {allSources.map((source) => {
+                                                    const value = `${source.type}:${source.id}`;
+                                                    const checked = selectedSources.includes(value);
+                                                    return (
+                                                        <label
+                                                            key={value}
+                                                            className="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                className="mt-1 h-4 w-4 rounded border-slate-300"
+                                                                checked={checked}
+                                                                onChange={() => {
+                                                                    setSelectedSources((prev) =>
+                                                                        checked ? prev.filter((item) => item !== value) : [...prev, value]
+                                                                    );
+                                                                }}
+                                                            />
+                                                            <span className="flex flex-col">
+                                                                <span className="font-medium">{source.label}</span>
+                                                                <span className="text-xs text-muted-foreground capitalize">
+                                                                    {source.type}
+                                                                    {source.helper ? ` • ${source.helper}` : ""}
+                                                                </span>
+                                                            </span>
+                                                        </label>
+                                                    );
+                                                })}
+                                                {allSources.length === 0 && (
+                                                    <p className="text-sm text-muted-foreground">No sources connected yet.</p>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                                <Button type="button" size="sm" variant="outline" onClick={() => setSelectedSources([])}>
+                                                    Clear selection
+                                                </Button>
+                                                <Button type="button" size="sm" onClick={() => setSourcePickerOpen(false)}>
+                                                    Done
+                                                </Button>
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="fromDate">From date</Label>
+                                    <Input id="fromDate" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="toDate">To date</Label>
+                                    <Input id="toDate" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <Button onClick={handleSync} disabled={syncLoading}>
+                                    {syncLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                                    Sync latest/new transactions
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={resetSyncConfig}>
+                                    Reset
+                                </Button>
+                            </div>
+                            {feedback && feedback.type === "success" && (
+                                <Alert>
+                                    <CheckCircle2 className="h-4 w-4" />
+                                    <AlertTitle>Success</AlertTitle>
+                                    <AlertDescription>{feedback.message}</AlertDescription>
+                                </Alert>
+                            )}
+                            {feedback && feedback.type === "error" && (
+                                <Alert variant="destructive">
+                                    <AlertCircle className="h-4 w-4" />
+                                    <AlertTitle>Error</AlertTitle>
+                                    <AlertDescription>{feedback.message}</AlertDescription>
+                                </Alert>
+                            )}
+                        </CardContent>
+                    )}
+                </Card>
+
+                <Card className="h-full">
+                    <CardHeader className="pb-4">
+                        <CardTitle>Filters</CardTitle>
+                        <CardDescription>Use account, date, category, and keywords to narrow results.</CardDescription>
+                    </CardHeader>
                     <CardContent className="space-y-3">
-                        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-                            <div className="space-y-1">
-                                <Label>Source scope</Label>
-                                <Select value={syncMode} onValueChange={(value) => isValidMode(value) && setSyncMode(value)}>
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-1.5">
+                                <Label>Accounts / Cards</Label>
+                                <Select
+                                    value={filterAccountId || "all"}
+                                    onValueChange={(val) => setFilterAccountId(val === "all" ? "" : val)}
+                                >
                                     <SelectTrigger>
-                                        <SelectValue placeholder="Select scope" />
+                                        <SelectValue placeholder="All sources" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {SYNC_MODES.map((mode) => (
-                                            <SelectItem key={mode.value} value={mode.value}>
-                                                {mode.label}
+                                        <SelectItem value="all">All sources</SelectItem>
+                                        {accounts.map((source) => (
+                                            <SelectItem key={source.id} value={source.id}>
+                                                {source.label} {source.helper ? `(${source.helper})` : ""}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div className="space-y-1">
-                                <Label>Custom selection</Label>
-                                <Popover open={sourcePickerOpen} onOpenChange={(open) => syncMode === "custom" && setSourcePickerOpen(open)}>
-                                    <PopoverTrigger asChild>
-                                        <Button
-                                            variant="outline"
-                                            disabled={syncMode !== "custom"}
-                                            className="w-full justify-between"
-                                        >
-                                            {selectedSources.length === 0
-                                                ? "Pick specific accounts or cards"
-                                                : `${selectedSources.length} source${selectedSources.length === 1 ? "" : "s"} selected`}
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent align="start" className="w-[320px] space-y-3">
-                                        <div className="text-sm font-medium">Select accounts or cards</div>
-                                            <div className="max-h-60 space-y-2 overflow-y-auto pr-2">
-                                            {allSources.map((source) => {
-                                                const value = `${source.type}:${source.id}`;
-                                                const checked = selectedSources.includes(value);
-                                                return (
-                                                    <label
-                                                        key={value}
-                                                        className="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            className="mt-1 h-4 w-4 rounded border-slate-300"
-                                                            checked={checked}
-                                                            onChange={() => {
-                                                                setSelectedSources((prev) =>
-                                                                    checked ? prev.filter((item) => item !== value) : [...prev, value]
-                                                                );
-                                                            }}
-                                                        />
-                                                        <span className="flex flex-col">
-                                                            <span className="font-medium">{source.label}</span>
-                                                            <span className="text-xs text-muted-foreground capitalize">
-                                                                {source.type}
-                                                                {source.helper ? ` • ${source.helper}` : ""}
-                                                            </span>
-                                                        </span>
-                                                    </label>
-                                                );
-                                            })}
-                                            {allSources.length === 0 && (
-                                                <p className="text-sm text-muted-foreground">No sources connected yet.</p>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                            <Button type="button" size="sm" variant="outline" onClick={() => setSelectedSources([])}>
-                                                Clear selection
-                                            </Button>
-                                            <Button type="button" size="sm" onClick={() => setSourcePickerOpen(false)}>
-                                                Done
-                                            </Button>
-                                        </div>
-                                    </PopoverContent>
-                                </Popover>
+                            <div className="space-y-1.5">
+                                <Label>Date range</Label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <Input type="date" value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} />
+                                    <Input type="date" value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} />
+                                </div>
                             </div>
-                            <div className="space-y-1">
-                                <Label htmlFor="fromDate">From date</Label>
-                                <Input id="fromDate" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+                            <div className="space-y-1.5">
+                                <Label>Search keyword</Label>
+                                <Input
+                                    placeholder="Merchant or description..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            applyFilters();
+                                        }
+                                    }}
+                                />
                             </div>
-                            <div className="space-y-1">
-                                <Label htmlFor="toDate">To date</Label>
-                                <Input id="toDate" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+                            <div className="space-y-1.5">
+                                <Label>Category</Label>
+                                <Select
+                                    value={filterCategoryId || "all"}
+                                    onValueChange={(val) => {
+                                        if (val === "all") {
+                                            setFilterCategoryId("");
+                                        } else {
+                                            setFilterCategoryId(val);
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="All" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All</SelectItem>
+                                        {categories.map((category) => (
+                                            <SelectItem key={category.id} value={category.name}>
+                                                {category.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <Button onClick={handleSync} disabled={syncLoading}>
-                                {syncLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                                Sync from OpenBanking
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={resetSyncConfig}>
-                                Reset
-                            </Button>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <Button onClick={applyFilters}>Filter</Button>
+                            <Button variant="outline" onClick={resetFilters}>Reset</Button>
                         </div>
-                        {feedback && feedback.type === "success" && (
-                            <Alert>
-                                <CheckCircle2 className="h-4 w-4" />
-                                <AlertTitle>Success</AlertTitle>
-                                <AlertDescription>{feedback.message}</AlertDescription>
-                            </Alert>
-                        )}
-                        {feedback && feedback.type === "error" && (
-                            <Alert variant="destructive">
-                                <AlertCircle className="h-4 w-4" />
-                                <AlertTitle>Error</AlertTitle>
-                                <AlertDescription>{feedback.message}</AlertDescription>
-                            </Alert>
-                        )}
                     </CardContent>
-                )}
-            </Card>
-
-            <Card>
-                <CardHeader className="pb-4">
-                    <CardTitle>Filters</CardTitle>
-                    <CardDescription>Use account, date, category, and keywords to narrow results.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-                        <div className="space-y-1.5">
-                            <Label>Accounts / Cards</Label>
-                            <Select
-                                value={filterAccountId || "all"}
-                                onValueChange={(val) => setFilterAccountId(val === "all" ? "" : val)}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="All sources" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All sources</SelectItem>
-                                    {accounts.map((source) => (
-                                        <SelectItem key={source.id} value={source.id}>
-                                            {source.label} {source.helper ? `(${source.helper})` : ""}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label>Date range</Label>
-                            <div className="grid grid-cols-2 gap-2">
-                                <Input type="date" value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} />
-                                <Input type="date" value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} />
-                            </div>
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label>Search keyword</Label>
-                            <Input
-                                placeholder="Merchant or description..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        applyFilters();
-                                    }
-                                }}
-                            />
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label>Category</Label>
-                            <Select
-                                value={filterCategoryId || "all"}
-                                onValueChange={(val) => {
-                                    if (val === "all") {
-                                        setFilterCategoryId("");
-                                    } else {
-                                        setFilterCategoryId(val);
-                                    }
-                                }}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="All" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All</SelectItem>
-                                    {categories.map((category) => (
-                                        <SelectItem key={category.id} value={category.name}>
-                                            {category.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <Button onClick={applyFilters}>Filter</Button>
-                        <Button variant="outline" onClick={resetFilters}>Reset</Button>
-                    </div>
-                </CardContent>
-            </Card>
+                </Card>
+            </div>
 
             <Card>
                 <CardHeader className="pb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

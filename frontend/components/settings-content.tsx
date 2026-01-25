@@ -9,7 +9,7 @@ import Link from "next/link"
 import { BankConnect } from "@/components/bank-connect"
 import { BankCredentialsManager } from "@/components/bank-credentials-manager"
 import { CardCredentialsManager } from "@/components/card-credentials-manager"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { apiFetch } from "@/lib/api"
 import { getErrorMessage } from "@/lib/errors"
@@ -19,14 +19,11 @@ import { clearPassphraseMarker, passphraseMarkerExists, setPassphraseMarker } fr
 export function SettingsContent({ connections = [] }: { connections?: BankConnection[] }) {
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [localConnections, setLocalConnections] = useState<BankConnection[]>(connections);
-    const [passphraseSet, setPassphraseSet] = useState(false);
+    const [passphraseSet, setPassphraseSet] = useState(() => passphraseMarkerExists());
     const [passphrase, setPassphrase] = useState("");
     const [passphraseConfirm, setPassphraseConfirm] = useState("");
     const [passphraseStatus, setPassphraseStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-    useEffect(() => {
-        setPassphraseSet(passphraseMarkerExists());
-    }, []);
 
     const handleDisconnect = async (id: string, label: string) => {
         setFeedback(null);

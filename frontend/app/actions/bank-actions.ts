@@ -50,7 +50,14 @@ export async function deleteBank(id: string) {
 export async function getBankConnections(userId?: string) {
     try {
         const query = userId ? `?userId=${encodeURIComponent(userId)}` : "";
-        return await apiFetch<BankConnection[]>(`/api/bank/connections${query}`);
+        const connections = await apiFetch<BankConnection[]>(`/api/bank/connections${query}`);
+        const now = Date.now();
+        return connections.map((connection) => {
+            const createdAt = connection.createdAt ? new Date(connection.createdAt).getTime() : now;
+            const days = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+            const daysLeft = Math.max(0, 90 - days);
+            return { ...connection, daysLeft };
+        });
     } catch (error) {
         console.error("Failed to fetch bank connections:", error);
         return [];
