@@ -23,10 +23,11 @@ import { Label } from "@/components/ui/label";
 import { Plus } from "lucide-react";
 import { addTransaction } from "@/app/actions/transaction-actions";
 import { getCategories } from "@/app/actions/category-actions";
+import { Card, Category, SubCategory } from "@/lib/types";
 
 interface AddTransactionDialogProps {
-    cards: any[];
-    categories?: any[];
+    cards: Card[];
+    categories?: Category[];
 }
 
 interface AddTransactionDialogInternalProps extends AddTransactionDialogProps {
@@ -42,7 +43,7 @@ export function AddTransactionDialog({ cards, categories: initialCategories, ope
     const [cardId, setCardId] = useState<string>("");
     const [category, setCategory] = useState<string>("");
     const [subCategory, setSubCategory] = useState<string>("");
-    const [categories, setCategories] = useState<any[]>(initialCategories || []);
+    const [categories, setCategories] = useState<Category[]>(initialCategories || []);
 
     useEffect(() => {
         if (!initialCategories || initialCategories.length === 0) {
@@ -166,8 +167,8 @@ export function AddTransactionDialog({ cards, categories: initialCategories, ope
                             </Select>
                         </div>
                         {category && (() => {
-                            const selectedCat = categories.find(c => c.name === category);
-                            const subCategories = selectedCat?.subCategories || [];
+                            const selectedCat = categories.find((c) => c.name === category);
+                            const subCategories: SubCategory[] = selectedCat?.subCategories || [];
                             return subCategories.length > 0 ? (
                                 <div className="grid grid-cols-4 items-center gap-4">
                                     <Label htmlFor="subCategory" className="text-right">
@@ -179,7 +180,7 @@ export function AddTransactionDialog({ cards, categories: initialCategories, ope
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="all">None</SelectItem>
-                                            {subCategories.map((sub: any) => (
+                                            {subCategories.map((sub: SubCategory) => (
                                                 <SelectItem key={sub.id} value={sub.name}>
                                                     {sub.name}
                                                 </SelectItem>

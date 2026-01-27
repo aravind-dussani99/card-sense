@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Download } from "lucide-react";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { getMonthToDateRange } from "@/lib/utils";
 
 type TransactionItem = {
     id: string;
@@ -63,9 +63,10 @@ interface BalanceDashboardProps {
 }
 
 export function BalanceDashboard({ cards, accounts, categories, initialTransactions }: BalanceDashboardProps) {
+    const monthToDate = useMemo(() => getMonthToDateRange(), []);
     const [activeTab, setActiveTab] = useState<"summary" | "cards" | "categories" | "loans" | "merchants">("summary");
-    const [dateFrom, setDateFrom] = useState<string>("");
-    const [dateTo, setDateTo] = useState<string>("");
+    const [dateFrom, setDateFrom] = useState<string>(monthToDate.from);
+    const [dateTo, setDateTo] = useState<string>(monthToDate.to);
     const [selectedCard, setSelectedCard] = useState<string>("");
     const [selectedAccount, setSelectedAccount] = useState<string>("");
     const [selectedSource, setSelectedSource] = useState<string>("");
@@ -153,25 +154,23 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
         return filtered;
     }, [initialTransactions, dateFrom, dateTo, selectedCard, selectedAccount, selectedSource, selectedCategory, selectedSubCategory, selectedTransactionType, selectedDirection, selectedMerchant, descriptionFilter, notesFilter, remarksFilter, selectedLoanPerson, activeTab]);
 
-    useEffect(() => {
-        if (activeTab === "merchants") {
-            setMerchantPage(1);
-        }
-    }, [filteredTransactions, activeTab]);
-
     const merchantTransactions = useMemo(() => {
         return [...filteredTransactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }, [filteredTransactions]);
 
     const merchantTotalPages = Math.max(1, Math.ceil(merchantTransactions.length / merchantPageSize));
+    const safeMerchantPage = Math.min(merchantPage, merchantTotalPages);
     const merchantPageSlice = useMemo(() => {
-        const start = (merchantPage - 1) * merchantPageSize;
+        const start = (safeMerchantPage - 1) * merchantPageSize;
         return merchantTransactions.slice(start, start + merchantPageSize);
-    }, [merchantPage, merchantTransactions, merchantPageSize]);
+    }, [safeMerchantPage, merchantTransactions, merchantPageSize]);
 
-    useEffect(() => {
-        setMerchantPage((prev) => Math.min(prev, merchantTotalPages));
-    }, [merchantTotalPages]);
+    const handleTabChange = (tab: typeof activeTab) => {
+        setActiveTab(tab);
+        if (tab === "merchants") {
+            setMerchantPage(1);
+        }
+    };
 
     const merchantKpis = useMemo(() => {
         const totalCount = merchantTransactions.length;
@@ -378,35 +377,35 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
             <div className="flex gap-2 border-b">
                 <Button
                     variant={activeTab === "summary" ? "default" : "ghost"}
-                    onClick={() => setActiveTab("summary")}
+                    onClick={() => handleTabChange("summary")}
                     className="rounded-b-none"
                 >
                     Summary
                 </Button>
                 <Button
                     variant={activeTab === "cards" ? "default" : "ghost"}
-                    onClick={() => setActiveTab("cards")}
+                    onClick={() => handleTabChange("cards")}
                     className="rounded-b-none"
                 >
                     Cards
                 </Button>
                 <Button
                     variant={activeTab === "categories" ? "default" : "ghost"}
-                    onClick={() => setActiveTab("categories")}
+                    onClick={() => handleTabChange("categories")}
                     className="rounded-b-none"
                 >
                     Categories
                 </Button>
                 <Button
                     variant={activeTab === "loans" ? "default" : "ghost"}
-                    onClick={() => setActiveTab("loans")}
+                    onClick={() => handleTabChange("loans")}
                     className="rounded-b-none"
                 >
                     Loans
                 </Button>
                 <Button
                     variant={activeTab === "merchants" ? "default" : "ghost"}
-                    onClick={() => setActiveTab("merchants")}
+                    onClick={() => handleTabChange("merchants")}
                     className="rounded-b-none"
                 >
                     Merchants
@@ -825,13 +824,13 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
 
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="text-sm text-muted-foreground">
-                                Showing {merchantPageSlice.length} of {merchantTransactions.length} · Page {merchantPage} of {merchantTotalPages}
+                                Showing {merchantPageSlice.length} of {merchantTransactions.length} · Page {safeMerchantPage} of {merchantTotalPages}
                             </div>
                             <div className="flex items-center gap-2 flex-wrap">
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    disabled={merchantPage === 1}
+                                    disabled={safeMerchantPage === 1}
                                     onClick={() => setMerchantPage((p) => Math.max(1, p - 1))}
                                 >
                                     Previous
@@ -841,20 +840,20 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                     if (
                                         pageNum === 1 ||
                                         pageNum === merchantTotalPages ||
-                                        Math.abs(pageNum - merchantPage) <= 1
+                                        Math.abs(pageNum - safeMerchantPage) <= 1
                                     ) {
                                         return (
                                             <Button
                                                 key={pageNum}
                                                 size="sm"
-                                                variant={merchantPage === pageNum ? "default" : "outline"}
+                                                variant={safeMerchantPage === pageNum ? "default" : "outline"}
                                                 onClick={() => setMerchantPage(pageNum)}
                                             >
                                                 {pageNum}
                                             </Button>
                                         );
                                     }
-                                    if (Math.abs(pageNum - merchantPage) === 2) {
+                                    if (Math.abs(pageNum - safeMerchantPage) === 2) {
                                         return <span key={`ellipsis-${pageNum}`} className="px-1 text-xs">…</span>;
                                     }
                                     return null;
@@ -862,7 +861,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    disabled={merchantPage === merchantTotalPages}
+                                    disabled={safeMerchantPage === merchantTotalPages}
                                     onClick={() => setMerchantPage((p) => Math.min(merchantTotalPages, p + 1))}
                                 >
                                     Next
@@ -892,7 +891,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                     )}
                                     {merchantPageSlice.map((t, idx) => (
                                         <tr key={t.id} className="border-b">
-                                            <td className="p-3">{(merchantPage - 1) * merchantPageSize + idx + 1}</td>
+                                            <td className="p-3">{(safeMerchantPage - 1) * merchantPageSize + idx + 1}</td>
                                             <td className="p-3 whitespace-nowrap">{new Date(t.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</td>
                                             <td className="p-3">{renderSource(t)}</td>
                                             <td className="p-3">{t.descriptionVia || t.description || "—"}</td>

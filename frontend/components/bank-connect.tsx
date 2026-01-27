@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CheckCircle2, RefreshCw, Link2, AlertCircle } from "lucide-react";
 import { getApiBaseUrl } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 
 export function BankConnect() {
     const [userId, setUserId] = useState("user-001");
@@ -39,8 +40,8 @@ export function BankConnect() {
                 throw new Error(data.error || "Sync failed");
             }
             setMessage(`Synced ${data.synced || 0} connection(s)`);
-        } catch (err: any) {
-            setError(err.message || "Sync failed");
+        } catch (err) {
+            setError(getErrorMessage(err, "Sync failed"));
         } finally {
             setSyncing(false);
         }

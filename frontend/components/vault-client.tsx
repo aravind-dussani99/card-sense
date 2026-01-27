@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   encryptVault,
   decryptVault,
@@ -9,6 +9,7 @@ import {
   exportVaultBundle,
   importVaultBundle,
 } from "@/lib/vault";
+import { getErrorMessage } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ export function VaultClient() {
   const [passphrase, setPassphrase] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [unlocked, setUnlocked] = useState(false);
   const [draft, setDraft] = useState<VaultEntry>({
@@ -142,8 +144,8 @@ export function VaultClient() {
       const text = await file.text();
       importVaultBundle(text);
       setStatus("Vault imported. Unlock with your passphrase.");
-    } catch (err: any) {
-      setError(err.message || "Failed to import vault.");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to import vault."));
     }
   };
 
@@ -182,15 +184,18 @@ export function VaultClient() {
             <Button variant="outline" onClick={handleExport} disabled={!hasVault}>
               Export Vault
             </Button>
-            <label className="inline-flex items-center">
+            <div className="inline-flex items-center">
               <input
                 type="file"
                 accept="application/json"
+                ref={fileInputRef}
                 className="hidden"
                 onChange={(e) => handleImport(e.target.files?.[0] || null)}
               />
-              <span className="px-3 py-2 border rounded-md text-sm cursor-pointer">Import Vault</span>
-            </label>
+              <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                Import Vault
+              </Button>
+            </div>
             <Button variant="ghost" onClick={lockVault} disabled={!unlocked}>
               Lock
             </Button>

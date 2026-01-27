@@ -1,8 +1,5 @@
 import { Metadata } from "next"
 import { MainNav } from "@/components/main-nav"
-import { FloatingAddButton } from "@/components/floating-add-button"
-import { getCards } from "@/app/actions/card-actions"
-import { getCategories } from "@/app/actions/category-actions"
 import { getSpendingByCategory, getMonthlySpending, getSpendingByCard, getSpendingByMerchant } from "@/app/actions/analytics-actions"
 import { AnalyticsCharts } from "@/components/analytics-charts"
 
@@ -12,8 +9,6 @@ export const metadata: Metadata = {
 }
 
 export default async function AnalyticsPage() {
-    const cards = await getCards();
-    const categories = await getCategories();
     const categoryData = await getSpendingByCategory();
     const monthlyData = await getMonthlySpending();
     const cardData = await getSpendingByCard();
@@ -38,7 +33,6 @@ export default async function AnalyticsPage() {
                     merchantData={merchantData}
                 />
             </div>
-            <FloatingAddButton cards={cards} categories={categories} />
         </div>
     )
 }

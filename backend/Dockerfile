@@ -2,15 +2,17 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev
+COPY package*.json ./
+RUN npm ci
 
 COPY prisma ./prisma
 RUN npx prisma generate
 
-COPY server.js ./
+COPY . .
 
 ENV NODE_ENV=production
-EXPOSE 8081
+ENV PORT=8080
+
+EXPOSE 8080
 
 CMD ["node", "server.js"]

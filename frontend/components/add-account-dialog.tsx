@@ -20,10 +20,11 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Building2 } from "lucide-react";
+import { Building2 } from "lucide-react";
 import { getBanks, addBankAccount } from "@/app/actions/bank-actions";
 import { createBankAccountCredential } from "@/app/actions/credential-actions";
 import { encryptPayload } from "@/lib/vault";
+import { Bank } from "@/lib/types";
 
 interface AddAccountDialogProps {
     open?: boolean;
@@ -39,7 +40,7 @@ export function AddAccountDialog({ open: controlledOpen, onOpenChange, prefillDa
     const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
     const setOpen = onOpenChange || setInternalOpen;
     const [loading, setLoading] = useState(false);
-    const [banks, setBanks] = useState<any[]>([]);
+    const [banks, setBanks] = useState<Bank[]>([]);
     const [selectedBank, setSelectedBank] = useState<string>("");
     const [storeCredentials, setStoreCredentials] = useState(false);
     const [credentialsLabel, setCredentialsLabel] = useState("");

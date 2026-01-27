@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Landmark } from "lucide-react";
+import { Landmark, Trash2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
+import { ViewAccountDialog } from "@/components/view-account-dialog";
 
 type BankAccountDisplay = {
     id: string;
@@ -32,8 +34,8 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
             await apiFetch(`/api/bank/accounts/${id}`, { method: "DELETE", skipJson: true });
             setList((prev) => prev.filter((acct) => acct.id !== id));
             setFeedback({ type: "success", message: `${label} removed.` });
-        } catch (err: any) {
-            setFeedback({ type: "error", message: err.message || "Failed to delete" });
+        } catch (err) {
+            setFeedback({ type: "error", message: getErrorMessage(err, "Failed to delete") });
         } finally {
             setLoadingId(null);
         }
@@ -54,7 +56,7 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                     <AlertDescription>{feedback.message}</AlertDescription>
                 </Alert>
             )}
-            <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
                 {list.map((acct) => {
                     const balanceValue = acct.availableBalance ?? acct.balance ?? null;
                     const balanceText = balanceValue === null ? "—" : balanceValue.toFixed(2);
@@ -62,33 +64,36 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                     const bankLabel = getBankLabel(acct);
                     const accountRef = acct.mask || acct.providerAccountId || "••••";
                     return (
-                        <div key={acct.id} className="p-4 rounded-lg border shadow-sm flex flex-col gap-2">
-                            <div className="text-sm text-muted-foreground">
+                        <div key={acct.id} className="p-3 rounded-lg border shadow-sm flex flex-col gap-2 w-full">
+                            <div className="text-xs text-muted-foreground">
                                 <span className="inline-flex items-center gap-1">
                                     <Landmark className="h-4 w-4" />
                                     {bankLabel}
                                 </span>
                             </div>
-                            <div className="text-lg font-semibold">{label}</div>
-                            <div className="text-sm text-muted-foreground break-all">
+                            <div className="text-base font-semibold">{label}</div>
+                            <div className="text-xs text-muted-foreground break-all">
                                 {acct.currency || "—"} · {accountRef}
                             </div>
                             <div className="text-sm font-semibold">
                                 Balance: {balanceText}
                             </div>
                             {acct.limit !== null && acct.limit !== undefined && (
-                                <div className="text-sm text-muted-foreground">
+                                <div className="text-xs text-muted-foreground">
                                     Limit: {acct.limit.toFixed(2)}
                                 </div>
                             )}
-                            <div className="mt-2 flex gap-2">
+                            <div className="mt-1 flex gap-2">
+                                <ViewAccountDialog account={acct} triggerVariant="icon" />
                                 <Button
                                     variant="outline"
-                                    className="text-red-600 border-red-200 hover:bg-red-50"
+                                    size="icon"
+                                    className="h-9 w-9 rounded-full text-red-600 border-red-200 hover:bg-red-50"
                                     disabled={loadingId === acct.id}
                                     onClick={() => deleteAccount(acct.id, label)}
+                                    aria-label="Delete account"
                                 >
-                                    {loadingId === acct.id ? "Deleting…" : "Delete"}
+                                    <Trash2 className="h-4 w-4" />
                                 </Button>
                             </div>
                         </div>

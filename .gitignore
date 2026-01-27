@@ -40,16 +40,8 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
-# local reference/backup directories
-/clean-main/
-/cardsense-–-smart-credit-tracker-&-spending-assistant (2)/
-/cardsense_-ai-powered-credit-card-tracker (1)/
-/mobile/
-/mobile application screens/
-
-# local notes and exports
-/conversations on *.md
-/logistics_overview_v2_stacked_export.html
+# legacy/reference material
+/legacy/
 
 # vercel
 .vercel

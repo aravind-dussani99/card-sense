@@ -22,11 +22,23 @@ import { Label } from "@/components/ui/label";
 import { Edit2 } from "lucide-react";
 import { updateTransaction } from "@/app/actions/transaction-actions";
 import { getCategories } from "@/app/actions/category-actions";
+import { Card, Category, SubCategory } from "@/lib/types";
+
+type LegacyTransaction = {
+    id: string;
+    cardId?: string;
+    category?: string;
+    subCategory?: string;
+    transactionType?: "expense" | "loan_given" | "loan_received";
+    loanTo?: string;
+    loanFrom?: string;
+    date: string | Date;
+};
 
 interface EditTransactionDialogProps {
-    transaction: any;
-    cards: any[];
-    categories: any[];
+    transaction: LegacyTransaction;
+    cards: Card[];
+    categories: Category[];
 }
 
 export function EditTransactionDialog({ transaction, cards, categories: initialCategories }: EditTransactionDialogProps) {
@@ -35,7 +47,7 @@ export function EditTransactionDialog({ transaction, cards, categories: initialC
     const [cardId, setCardId] = useState<string>(transaction.cardId || "");
     const [category, setCategory] = useState<string>(transaction.category || "");
     const [subCategory, setSubCategory] = useState<string>(transaction.subCategory || "");
-    const [categories, setCategories] = useState<any[]>(initialCategories || []);
+    const [categories, setCategories] = useState<Category[]>(initialCategories || []);
 
     useEffect(() => {
         if (open && (!initialCategories || initialCategories.length === 0)) {
@@ -72,8 +84,8 @@ export function EditTransactionDialog({ transaction, cards, categories: initialC
         }
     };
 
-    const selectedCat = categories.find(c => c.name === category);
-    const subCategories = selectedCat?.subCategories || [];
+    const selectedCat = categories.find((c) => c.name === category);
+    const subCategories: SubCategory[] = selectedCat?.subCategories || [];
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
@@ -167,11 +179,11 @@ export function EditTransactionDialog({ transaction, cards, categories: initialC
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="all">None</SelectItem>
-                                        {subCategories.map((sub: any) => (
-                                            <SelectItem key={sub.id} value={sub.name}>
-                                                {sub.name}
-                                            </SelectItem>
-                                        ))}
+                                            {subCategories.map((sub: SubCategory) => (
+                                                <SelectItem key={sub.id} value={sub.name}>
+                                                    {sub.name}
+                                                </SelectItem>
+                                            ))}
                                     </SelectContent>
                                 </Select>
                             </div>

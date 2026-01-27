@@ -10,10 +10,11 @@ import {
 import { Plus, CreditCard, Receipt } from "lucide-react"
 import { AddCardDialog } from "@/components/add-card-dialog"
 import { AddTransactionDialog } from "@/components/add-transaction-dialog"
+import { Card, Category } from "@/lib/types";
 
 interface FloatingAddButtonProps {
-    cards?: any[];
-    categories?: any[];
+    cards?: Card[];
+    categories?: Category[];
 }
 
 export function FloatingAddButton({ cards = [], categories = [] }: FloatingAddButtonProps) {

@@ -1,15 +1,15 @@
 import { Metadata } from "next"
+import Link from "next/link"
 import { MainNav } from "@/components/main-nav"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { CreditCard, DollarSign, TrendingUp, Activity } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { CreditCard, DollarSign, Gift } from "lucide-react"
 import { BankTransactionList } from "@/components/bank-transaction-list"
 import { AIInsights } from "@/components/ai-insights"
-import { FloatingAddButton } from "@/components/floating-add-button"
 import { getCards } from "@/app/actions/card-actions"
-import { getCategories } from "@/app/actions/category-actions"
-import { getSpendingByMerchant } from "@/app/actions/analytics-actions"
-import { MerchantSpendChart } from "@/components/merchant-spend-chart"
-import { getTransactions } from "@/app/actions/transaction-actions"
+import { getBankAccounts } from "@/app/actions/bank-actions"
+import { getBankTransactions } from "@/app/actions/transaction-actions"
+import { BankAccount, BankTransaction, Card as CardModel } from "@/lib/types"
 
 export const metadata: Metadata = {
   title: "Dashboard - CardSense",
@@ -17,15 +17,35 @@ export const metadata: Metadata = {
 }
 
 export default async function DashboardPage() {
-  const cards: any[] = await getCards();
-  const categories = await getCategories();
-  const merchantData = await getSpendingByMerchant();
-  const recentTransactions = await getTransactions({ limit: 10 });
+  const cards: CardModel[] = await getCards();
+  const bankAccounts: BankAccount[] = await getBankAccounts();
+  const recentTransactions: BankTransaction[] = await getBankTransactions(10);
 
-  const totalBalance = cards.reduce((acc, card) => acc + card.balance, 0);
-  const activeCards = cards.length;
-  const totalLimit = cards.reduce((acc, card) => acc + card.limit, 0);
-  const creditUtilization = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : 0;
+  const toNumber = (value?: number | null) => (typeof value === "number" ? value : 0);
+  const isOverdraft = (account: BankAccount) => {
+    const type = (account.type || "").toLowerCase();
+    const name = (account.name || "").toLowerCase();
+    return type.includes("overdraft") || name.includes("overdraft");
+  };
+  const overdraftAccounts = bankAccounts.filter(isOverdraft);
+  const standardAccounts = bankAccounts.filter((account) => !isOverdraft(account));
+
+  const bankAvailable = standardAccounts.reduce(
+    (sum, acct) => sum + toNumber(acct.availableBalance ?? acct.balance),
+    0
+  );
+  const overdraftLimit = overdraftAccounts.reduce((sum, acct) => sum + toNumber(acct.limit), 0);
+  const overdraftAvailable = overdraftAccounts.reduce(
+    (sum, acct) => sum + toNumber(acct.availableBalance ?? acct.balance),
+    0
+  );
+  const overdraftUsed = Math.max(0, overdraftLimit - overdraftAvailable);
+
+  const creditLimit = cards.reduce((sum, card) => sum + toNumber(card.limit), 0);
+  const creditUsed = cards.reduce((sum, card) => sum + toNumber(card.balance), 0);
+  const creditAvailable = Math.max(0, creditLimit - creditUsed);
+
+  const totalBalance = bankAvailable + overdraftAvailable + creditAvailable;
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -39,80 +59,112 @@ export default async function DashboardPage() {
         <div className="flex items-center justify-between space-y-2">
           <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
         </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Total Balance
-              </CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${totalBalance.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">
-                +20.1% from last month
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Active Cards
-              </CardTitle>
-              <CreditCard className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{activeCards}</div>
-              <p className="text-xs text-muted-foreground">
-                2 cards expiring soon
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Rewards</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">12,340 pts</div>
-              <p className="text-xs text-muted-foreground">
-                Worth approx $123.40
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Credit Utilization
-              </CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{creditUtilization.toFixed(1)}%</div>
-              <p className="text-xs text-muted-foreground">
-                {creditUtilization < 30 ? "Excellent (Below 30%)" : "High Utilization"}
-              </p>
-            </CardContent>
-          </Card>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <Link href="/cards#bank-accounts" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Total Balance
+                </CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent className="flex-1">
+                <div className="text-2xl font-bold">£{totalBalance.toFixed(2)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Combined available balance (bank, overdraft, credit cards)
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/cards#bank-accounts" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Bank Account Balance
+                </CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent className="flex-1">
+                <div className="text-2xl font-bold">£{bankAvailable.toFixed(2)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Available across all bank accounts
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/cards#overdraft-accounts" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Overdraft Balance
+                </CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent className="flex-1">
+                <div className="text-2xl font-bold">£{overdraftAvailable.toFixed(2)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Limit £{overdraftLimit.toFixed(2)} · Used £{overdraftUsed.toFixed(2)}
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/cards#credit-cards" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Credit Card Balance
+                </CardTitle>
+                <CreditCard className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent className="flex-1">
+                <div className="text-2xl font-bold">£{creditAvailable.toFixed(2)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Limit £{creditLimit.toFixed(2)} · Used £{creditUsed.toFixed(2)}
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/rewards" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Rewards</CardTitle>
+                <Gift className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent className="flex-1">
+                <div className="text-2xl font-bold">0 pts</div>
+                <p className="text-xs text-muted-foreground">
+                  Rewards balance will appear here
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
           <Card className="col-span-4">
             <CardHeader>
-              <CardTitle>Recent Transactions</CardTitle>
-              <CardDescription>
-                Your latest bank transactions.
-              </CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle>Recent Transactions</CardTitle>
+                  <CardDescription>
+                    Your latest bank transactions (last 10).
+                  </CardDescription>
+                </div>
+                <Link href="/transactions" className="inline-flex">
+                  <Button variant="outline" size="sm" className="cursor-pointer">Show all transactions</Button>
+                </Link>
+              </div>
             </CardHeader>
             <CardContent>
               <BankTransactionList
-                transactions={recentTransactions.map((tx: any) => ({
+                transactions={recentTransactions.map((tx: BankTransaction) => ({
                   id: tx.id,
-                  merchant: tx.merchant,
-                  descriptionVia: tx.description,
-                  category: tx.category,
+                  merchant: tx.merchant || tx.descriptionVia || "Unknown",
+                  descriptionVia: tx.descriptionVia || tx.merchant || "",
+                  category: tx.category || "Uncategorized",
                   amount: tx.amount,
-                  currency: "USD",
-                  account: tx.card ? { name: tx.card.name, type: "Card" } : null,
+                  currency: tx.currency || "USD",
+                  date: tx.date,
+                  account: tx.account ? { name: tx.account.name || "Account", type: tx.account.type || "Account" } : null,
                 }))}
               />
             </CardContent>
@@ -129,11 +181,7 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
         </div>
-        <div className="grid gap-4 md:grid-cols-1">
-          <MerchantSpendChart data={merchantData} />
-        </div>
       </div>
-      <FloatingAddButton cards={cards} categories={categories} />
     </div>
   )
 }

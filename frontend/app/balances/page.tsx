@@ -1,10 +1,11 @@
 import { Metadata } from "next"
 import { MainNav } from "@/components/main-nav"
 import { BalanceDashboard } from "@/components/balance-dashboard"
-import { FloatingAddButton } from "@/components/floating-add-button"
 import { getCards } from "@/app/actions/card-actions"
 import { getCategories } from "@/app/actions/category-actions"
-import { getTransactions } from "@/app/actions/transaction-actions"
+import { getBankTransactions } from "@/app/actions/transaction-actions"
+import { getBankAccounts } from "@/app/actions/bank-actions"
+import { BankAccount, BankTransaction, Card, Category } from "@/lib/types"
 
 export const metadata: Metadata = {
     title: "Balance Tracking - CardSense",
@@ -12,27 +13,30 @@ export const metadata: Metadata = {
 }
 
 export default async function BalancesPage() {
-    const cards = await getCards();
-    const categories = await getCategories();
-    const transactions = await getTransactions({ limit: 1000 });
-    const mapped = transactions.map((tx: any) => ({
+    const cards: Card[] = await getCards();
+    const categories: Category[] = await getCategories();
+    const [transactions, bankAccounts] = await Promise.all([
+        getBankTransactions(1000),
+        getBankAccounts(),
+    ]);
+    const mapped = (transactions as BankTransaction[]).map((tx) => ({
         id: tx.id,
-        cardId: tx.cardId || undefined,
-        bankAccountId: null,
+        cardId: null,
+        bankAccountId: tx.accountId || null,
         category: tx.category || "Uncategorized",
-        subCategory: tx.subCategory || null,
-        merchant: tx.merchant || "Unknown",
-        merchantTo: tx.merchant || "Unknown",
-        description: tx.description || "",
-        descriptionVia: tx.description || "",
+        subCategory: tx.meta?.subCategory || null,
+        merchant: tx.merchant || tx.descriptionVia || "Unknown",
+        merchantTo: tx.merchant || tx.descriptionVia || "Unknown",
+        description: tx.descriptionVia || "",
+        descriptionVia: tx.descriptionVia || "",
         amount: tx.amount,
-        transactionType: tx.transactionType || "expense",
+        transactionType: tx.amount < 0 ? "expense" : "income",
         direction: tx.amount < 0 ? "debit" : "credit",
         loanTo: tx.loanTo || null,
         loanFrom: tx.loanFrom || null,
         date: tx.date ? new Date(tx.date).toISOString() : new Date().toISOString(),
         notes: null,
-        remarks: null,
+        remarks: tx.meta?.remarks || null,
     }));
 
     return (
@@ -46,12 +50,11 @@ export default async function BalancesPage() {
             <div className="flex-1">
                     <BalanceDashboard 
                         cards={cards} 
-                        accounts={[]}
+                        accounts={bankAccounts as BankAccount[]}
                         categories={categories} 
                         initialTransactions={mapped}
                     />
             </div>
-            <FloatingAddButton cards={cards} categories={categories} />
         </div>
     )
 }

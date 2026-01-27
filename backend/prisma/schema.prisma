@@ -234,6 +234,25 @@ model BankTransaction {
   raw                   String?
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
+  meta                  BankTransactionMeta?
+}
+
+model BankTransactionMeta {
+  id                 String          @id @default(uuid())
+  bankTransactionId  String          @unique
+  bankTransaction    BankTransaction @relation(fields: [bankTransactionId], references: [id], onDelete: Cascade)
+  openingBalance     Float?
+  closingBalance     Float?
+  fromEntity         String?
+  viaEntity          String?
+  toEntity           String?
+  headAccount        String?
+  subCategory        String?
+  remarks            String?
+  attachmentsJson    String?
+  comments           String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 }
 
 model BankAccountCredential {

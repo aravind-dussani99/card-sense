@@ -13,17 +13,17 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             <button
                 ref={ref}
                 className={cn(
-                    "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+                    "inline-flex items-center justify-center whitespace-nowrap rounded-full border text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
                     {
-                        "bg-primary text-primary-foreground hover:bg-primary/90": variant === "default",
-                        "bg-destructive text-destructive-foreground hover:bg-destructive/90": variant === "destructive",
-                        "border border-input bg-background hover:bg-accent hover:text-accent-foreground": variant === "outline",
-                        "bg-secondary text-secondary-foreground hover:bg-secondary/80": variant === "secondary",
-                        "hover:bg-accent hover:text-accent-foreground": variant === "ghost",
-                        "text-primary underline-offset-4 hover:underline": variant === "link",
-                        "h-10 px-4 py-2": size === "default",
-                        "h-9 rounded-md px-3": size === "sm",
-                        "h-11 rounded-md px-8": size === "lg",
+                        "border-slate-700 bg-white text-slate-800 hover:bg-slate-50": variant === "default",
+                        "border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90": variant === "destructive",
+                        "border-slate-700 bg-white text-slate-800 hover:bg-slate-50": variant === "outline",
+                        "border-slate-700 bg-white text-slate-800 hover:bg-slate-50": variant === "secondary",
+                        "border-slate-700 bg-white text-slate-800 hover:bg-slate-50": variant === "ghost",
+                        "border-transparent bg-transparent text-slate-800 underline-offset-4 hover:underline": variant === "link",
+                        "h-11 px-6 py-2.5": size === "default",
+                        "h-9 px-4": size === "sm",
+                        "h-12 px-8": size === "lg",
                         "h-10 w-10": size === "icon",
                     },
                     className

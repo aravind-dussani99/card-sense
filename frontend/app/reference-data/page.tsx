@@ -1,6 +1,9 @@
 import { Metadata } from "next"
 import { MainNav } from "@/components/main-nav"
 import { ReferenceDataManager } from "@/components/reference-data-manager"
+import { getCardTypes } from "@/app/actions/card-type-actions"
+import { getBanks } from "@/app/actions/bank-actions"
+import { getCategories } from "@/app/actions/category-actions"
 
 export const metadata: Metadata = {
     title: "Reference Data - CardSense",
@@ -8,6 +11,12 @@ export const metadata: Metadata = {
 }
 
 export default async function ReferenceDataPage() {
+    const [cardTypes, banks, categories] = await Promise.all([
+        getCardTypes(),
+        getBanks(),
+        getCategories(),
+    ]);
+
     return (
         <div className="flex flex-col min-h-screen">
             <div className="border-b bg-white/80 backdrop-blur-md shadow-sm">
@@ -17,9 +26,12 @@ export default async function ReferenceDataPage() {
                 </div>
             </div>
             <div className="flex-1 space-y-4 p-8 pt-6">
-                <ReferenceDataManager />
+                <ReferenceDataManager
+                    initialCardTypes={cardTypes}
+                    initialBanks={banks}
+                    initialCategories={categories}
+                />
             </div>
         </div>
     )
 }
-

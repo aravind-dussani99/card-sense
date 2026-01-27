@@ -1,6 +1,8 @@
 "use server";
 
 import { apiFetch } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
+import { Card } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
 export interface CardFormData {
@@ -25,29 +27,29 @@ export interface CardFormData {
 
 export async function addCard(data: CardFormData) {
     try {
-        const card = await apiFetch("/api/cards", {
+        const card = await apiFetch<Card>("/api/cards", {
             method: "POST",
             body: JSON.stringify(data),
         });
         revalidatePath("/cards");
         return { success: true, data: card };
-    } catch (error: any) {
+    } catch (error) {
         console.error("Failed to add card:", error);
-        return { success: false, error: error.message || "Failed to add card" };
+        return { success: false, error: getErrorMessage(error, "Failed to add card") };
     }
 }
 
 export async function updateCard(id: string, data: Partial<CardFormData>) {
     try {
-        const card = await apiFetch(`/api/cards/${id}`, {
+        const card = await apiFetch<Card>(`/api/cards/${id}`, {
             method: "PUT",
             body: JSON.stringify(data),
         });
         revalidatePath("/cards");
         return { success: true, data: card };
-    } catch (error: any) {
+    } catch (error) {
         console.error("Failed to update card:", error);
-        return { success: false, error: error.message || "Failed to update card" };
+        return { success: false, error: getErrorMessage(error, "Failed to update card") };
     }
 }
 
@@ -56,15 +58,15 @@ export async function deleteCard(id: string) {
         await apiFetch(`/api/cards/${id}`, { method: "DELETE", skipJson: true });
         revalidatePath("/cards");
         return { success: true };
-    } catch (error: any) {
+    } catch (error) {
         console.error("Failed to delete card:", error);
-        return { success: false, error: error.message || "Failed to delete card" };
+        return { success: false, error: getErrorMessage(error, "Failed to delete card") };
     }
 }
 
 export async function getCards() {
     try {
-        return await apiFetch<any[]>("/api/cards");
+        return await apiFetch<Card[]>("/api/cards");
     } catch (error) {
         console.error("Failed to fetch cards:", error);
         return [];

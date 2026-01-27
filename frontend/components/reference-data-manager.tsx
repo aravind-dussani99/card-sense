@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -28,6 +28,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Bank, CardType, Category, SubCategory } from "@/lib/types"
 
 type DataType = "cardTypes" | "banks" | "categories" | "subCategories";
 
@@ -41,12 +42,18 @@ interface ListItem {
     categoryName?: string;
 }
 
-export function ReferenceDataManager() {
+interface ReferenceDataManagerProps {
+    initialCardTypes: CardType[];
+    initialBanks: Bank[];
+    initialCategories: Category[];
+}
+
+export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCategories }: ReferenceDataManagerProps) {
     const router = useRouter();
-    const [cardTypes, setCardTypes] = useState<any[]>([]);
-    const [banks, setBanks] = useState<any[]>([]);
-    const [categories, setCategories] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [cardTypes, setCardTypes] = useState<CardType[]>(initialCardTypes);
+    const [banks, setBanks] = useState<Bank[]>(initialBanks);
+    const [categories, setCategories] = useState<Category[]>(initialCategories);
+    const [loading, setLoading] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<ListItem | null>(null);
@@ -55,11 +62,6 @@ export function ReferenceDataManager() {
     const [formData, setFormData] = useState({ name: "", icon: "", color: "", categoryId: "", type: "" });
     const [newSubCategory, setNewSubCategory] = useState<Record<string, string>>({});
     const [editingSub, setEditingSub] = useState<{ id: string; name: string } | null>(null);
-    const [subLoading, setSubLoading] = useState(false);
-
-    useEffect(() => {
-        loadData();
-    }, []);
 
     const loadData = async () => {
         setLoading(true);
@@ -385,7 +387,7 @@ export function ReferenceDataManager() {
                                     <div className="space-y-1">
                                         <div className="text-xs font-medium text-muted-foreground">Sub-categories:</div>
                                         <div className="flex flex-wrap gap-0.5 sm:gap-1">
-                                            {category.subCategories?.map((sub: any) => (
+                                            {category.subCategories?.map((sub: SubCategory) => (
                                                 <span
                                                     key={sub.id}
                                                     className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-secondary rounded text-xs"
@@ -403,28 +405,38 @@ export function ReferenceDataManager() {
                                                                     }
                                                                 }}
                                                             />
-                                                            <button onClick={() => setEditingSub(null)} className="text-muted-foreground" aria-label="Cancel rename">
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-4 w-4"
+                                                                onClick={() => setEditingSub(null)}
+                                                                aria-label="Cancel rename"
+                                                            >
                                                                 ✕
-                                                            </button>
+                                                            </Button>
                                                         </>
                                                     ) : (
                                                         <>
                                                             {sub.name}
-                                                            <button
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-4 w-4"
                                                                 onClick={() => setEditingSub({ id: sub.id, name: sub.name })}
-                                                                className="text-muted-foreground hover:text-foreground"
                                                                 aria-label="Rename sub-category"
                                                             >
                                                                 ✎
-                                                            </button>
+                                                            </Button>
                                                         </>
                                                     )}
-                                                    <button
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-4 w-4 text-destructive hover:text-destructive/80"
                                                         onClick={() => handleDeleteSubCategory(sub.id)}
-                                                        className="text-destructive hover:text-destructive/80"
                                                     >
                                                         <Trash2 className="h-2.5 w-2.5" />
-                                                    </button>
+                                                    </Button>
                                                 </span>
                                             ))}
                                         </div>
