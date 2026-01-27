@@ -1,62 +1,131 @@
 # Card Sense
 
-Card Sense is now organized as a 3-tier app:
+[![CI + Build + Deploy](https://github.com/aravind-dussani99/card-sense/actions/workflows/cloud-run-deploy.yml/badge.svg)](https://github.com/aravind-dussani99/card-sense/actions/workflows/cloud-run-deploy.yml)
+
+Card Sense is a 3-tier personal finance app focused on cards, bank accounts, Open Banking sync, and transaction review.
+
+## Architecture
 - `frontend/`: Next.js 16 App Router UI
 - `backend/`: Express + Prisma API
-- `backend/prisma`: database schema + migrations (SQLite for local dev)
+- `backend/prisma/`: Prisma schema and migrations
+- `mobile-app/`: Expo (work-in-progress)
 
-## Quick start
-- Prereqs: Node 20+, npm.
-- Backend:
-  - `cd backend`
-  - `npm install`
-  - Env: copy `backend/.env.example` to `.env` (or run from repo root with the existing `.env`)
-  - DB seed: `npm run seed`
-- Start API: `npm run dev` (serves http://localhost:8081)
-- Frontend:
-  - `cd frontend`
-  - `npm install`
-  - Env: copy `frontend/.env.example` to `.env.local`
-  - Start UI: `npm run dev` then open http://localhost:3000
+## Phase-1 features
+- Accounts Hub with separate sections for bank accounts, overdrafts, and credit cards
+- Dashboard KPIs wired to live balances and quick navigation
+- Open Banking sync into a central transaction store
+- Transaction workbench with:
+  - Sync + Filter dialogs
+  - Sticky headers, pagination, and per-row actions
+  - Metadata layer (opening/closing balances, from/to, head account, notes)
+- Secure Vault (local-only, client-side encryption) for sensitive details
+- Settings and reference data management (banks, categories, card types)
 
-## Environment
-Set in `backend/.env`:
-- `DATABASE_URL=file:./dev.db`
-- Outlook IMAP: `OUTLOOK_USER`, `OUTLOOK_PASSWORD` (app password), optional `OUTLOOK_HOST`/`OUTLOOK_PORT` (defaults `outlook.office365.com:993`)
-- Gmail OAuth: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`, `GMAIL_REDIRECT_URI`
-- TrueLayer (Open Banking): `TRUELAYER_CLIENT_ID`, `TRUELAYER_CLIENT_SECRET`, `TRUELAYER_REDIRECT_URI`
+## Local development (Postgres via Docker) — recommended
+This keeps local behavior aligned with production.
 
-## Secure Vault (local-only)
-- A local-only encrypted vault is available at `/vault`.
-- Data is encrypted in the browser and stored only on the device (no server sync).
+1) Start Postgres in Docker (use port 5433 to avoid conflicts):
 
-## Encrypted credentials (server-side storage)
-- Bank account and card credentials are stored as encrypted payloads in the database.
-- Run Prisma migrations after schema updates: `cd backend && npx prisma migrate dev`.
-- LLM: `OPENAI_API_KEY`, optional `OPENAI_MODEL`; `ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL`; `USE_LLM_FOR_STATEMENTS=true|false`
-- Optional SMTP if you send mail: `SMTP_HOST`, `SMTP_PORT`
+```bash
+docker rm -f card-sense-postgres 2>/dev/null || true
+docker run --name card-sense-postgres \
+  -e POSTGRES_USER=card_sense_user \
+  -e POSTGRES_PASSWORD=card_sense_pass \
+  -e POSTGRES_DB=card_sense_dev \
+  -p 5433:5432 \
+  -d postgres:16
+```
 
-Reference docs in repo: `QUICK_SETUP.md`, `EMAIL_SETUP.md`, `EMAIL_LLM_SETUP.md`, `EMAIL_CONFIGURATION.md`, `OUTLOOK_SETUP_FIX.md`, `GOOGLE_OAUTH_SETUP.md`, `GMAIL_TOKEN_SETUP.md`.
+2) Backend environment:
+- Copy `backend/.env.example` to `backend/.env`
+- Set:
 
-## Email providers
-- Outlook: requires 2FA + IMAP enabled + app password. Test with `node scripts/test-outlook-connection.js` (auto-loads `.env`). If you see `LOGIN failed`, regenerate an app password and confirm IMAP is enabled on the account. You can override the host with `OUTLOOK_HOST=imap-mail.outlook.com` if your tenant requires it.
-- Gmail: follow `GOOGLE_OAUTH_SETUP.md`/`GMAIL_TOKEN_SETUP.md` to create OAuth credentials and refresh token; `GMAIL_REDIRECT_URI` should match the OAuth app.
+```bash
+DATABASE_URL="postgresql://card_sense_user:card_sense_pass@localhost:5433/card_sense_dev?schema=public"
+PORT=8081
+```
 
-## LLM + statements
-- Email parsing uses OpenAI by default; Anthropic is supported.
-- Statement parsing can use LLM when `USE_LLM_FOR_STATEMENTS` is not `false`; otherwise regex fallback is used.
+3) Use the Postgres Prisma schema locally:
+- In `backend/prisma/schema.prisma`, set:
 
-## Database + tools
-- Manage data with `npx prisma studio`.  
-- Seed sample data: `npm run seed` in `backend/`.
-- SQLite file lives at `dev.db`.
+```prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+```
 
-## Checks and troubleshooting
-- Lint: `npm run lint` (currently fails with many `no-explicit-any`/unused warnings and a few React hook warnings; prioritize typing the server actions/components).  
-- Build: `npm run build` currently fails offline because Next tries to fetch Geist fonts from Google; allow network or pin local fonts to unblock CI.  
-- Outlook auth: use the test script above; errors about authentication almost always mean missing 2FA/app password or IMAP disabled.
+4) Reset migrations (required when switching from SQLite to Postgres):
 
-## Smoke testing email/LLM flows
-- Outlook IMAP: `node scripts/test-outlook-connection.js` to verify credentials reach inbox and fetch an unread message.  
-- Gmail OAuth: `node scripts/verify-gmail-credentials.js` or `node scripts/generate-gmail-token.js` to validate your OAuth keys/refresh token.  
-- Statements: upload a sample PDF/CSV via the app; set `USE_LLM_FOR_STATEMENTS=false` if you want to test the regex path without API calls.
+```bash
+rm -rf backend/prisma/migrations
+cd backend
+npx prisma migrate dev --name init
+npx prisma generate
+npm run seed
+npm run dev
+```
+
+5) Frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open:
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:8081`
+
+## Usage notes
+- Open Banking:
+  - Configure TrueLayer env vars in `backend/.env`
+  - Authorize via Settings
+  - Use the Sync button on the Transactions page header
+- Transactions:
+  - Use Sync/Filter from the page header
+  - Edit/annotate via row actions
+  - Deletion is limited to cash/manual entries
+- Vault:
+  - Vault and passphrase are device-local by design
+
+## Deployment
+- CI/CD runs via GitHub Actions: `.github/workflows/cloud-run-deploy.yml`
+- Production deploys occur on `main` pushes
+- PRs are lint/format focused (deploy steps disabled)
+- Frontend builds use Node 20 in Docker to match Next.js 16 requirements
+
+## Contribution guide
+1) Create a feature branch:
+
+```bash
+git checkout -b feature/your-change
+```
+
+2) Run checks locally:
+
+```bash
+cd backend && npm install && npm run lint --if-present
+cd frontend && npm install && npm run lint --if-present
+```
+
+3) Validate the app:
+- Run backend on `8081`
+- Run frontend on `3000`
+- Exercise Accounts Hub and Transactions flows
+
+4) Commit and open a PR:
+
+```bash
+git add .
+git commit -m "feat: describe your change"
+git push origin feature/your-change
+```
+
+## Troubleshooting
+- Frontend Docker build fails with Node 18:
+  - Next.js 16 requires Node `>=20.9`
+  - This repo now uses Node 20 in `frontend/Dockerfile`
+- Port conflicts on local Postgres:
+  - Use `5433:5432` and update `DATABASE_URL`
