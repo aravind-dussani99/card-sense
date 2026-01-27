@@ -4,6 +4,8 @@
 
 Card Sense is a 3-tier personal finance app focused on cards, bank accounts, Open Banking sync, and transaction review.
 
+See `ROADMAP.md` for upcoming features and prioritization.
+
 ## Architecture
 - `frontend/`: Next.js 16 App Router UI
 - `backend/`: Express + Prisma API
