@@ -24,6 +24,7 @@ import { Building2 } from "lucide-react";
 import { getBanks, addBankAccount } from "@/app/actions/bank-actions";
 import { createBankAccountCredential } from "@/app/actions/credential-actions";
 import { encryptPayload } from "@/lib/vault";
+import { requireData } from "@/lib/api-result";
 import { Bank } from "@/lib/types";
 
 interface AddAccountDialogProps {
@@ -124,12 +125,13 @@ export function AddAccountDialog({ open: controlledOpen, onOpenChange, prefillDa
                     alert("Enter a vault passphrase to encrypt credentials.");
                     return;
                 }
+                const account = requireData(result, "Account saved, but credential storage was skipped due to missing account id.");
                 try {
                     const payload = await encryptPayload(credentialsPassphrase, {
                         ...credentialsData,
                         label: credentialsLabel || name,
                     });
-                    await createBankAccountCredential(result.data.id, payload, credentialsLabel || name);
+                    await createBankAccountCredential(account.id, payload, credentialsLabel || name);
                 } catch (error) {
                     console.error("Failed to store account credentials:", error);
                     alert("Account saved, but credentials could not be stored.");
