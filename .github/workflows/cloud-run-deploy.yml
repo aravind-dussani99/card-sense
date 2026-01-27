@@ -440,10 +440,16 @@ jobs:
       - name: Check existing backend image (prod)
         id: backend-image-prod
         run: |
-          IMAGE_URI=$(gcloud artifacts docker images list "${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/${IMAGE_NAME_BACKEND}" --format="value(IMAGE)" --limit=1 --sort-by=~UPDATE_TIME)
-          if [ -n "${IMAGE_URI}" ]; then
+          IMAGE_INFO=$(gcloud artifacts docker images list "${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/${IMAGE_NAME_BACKEND}" --format="value(IMAGE,DIGEST)" --limit=1 --sort-by=~UPDATE_TIME)
+          IMAGE_URI=""
+          IMAGE_DIGEST=""
+          if [ -n "${IMAGE_INFO}" ]; then
+            read -r IMAGE_URI IMAGE_DIGEST <<< "${IMAGE_INFO}"
+          fi
+          if [ -n "${IMAGE_URI}" ] && [ -n "${IMAGE_DIGEST}" ]; then
+            IMAGE_WITH_DIGEST="${IMAGE_URI}@${IMAGE_DIGEST}"
             echo "image_exists=true" >> $GITHUB_OUTPUT
-            echo "latest_image=${IMAGE_URI}" >> $GITHUB_OUTPUT
+            echo "latest_image=${IMAGE_WITH_DIGEST}" >> $GITHUB_OUTPUT
           else
             echo "image_exists=false" >> $GITHUB_OUTPUT
           fi
@@ -600,10 +606,16 @@ jobs:
       - name: Check existing backend image (dev)
         id: backend-image-dev
         run: |
-          IMAGE_URI=$(gcloud artifacts docker images list "${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/${IMAGE_NAME_BACKEND_PR}" --format="value(IMAGE)" --limit=1 --sort-by=~UPDATE_TIME)
-          if [ -n "${IMAGE_URI}" ]; then
+          IMAGE_INFO=$(gcloud artifacts docker images list "${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/${IMAGE_NAME_BACKEND_PR}" --format="value(IMAGE,DIGEST)" --limit=1 --sort-by=~UPDATE_TIME)
+          IMAGE_URI=""
+          IMAGE_DIGEST=""
+          if [ -n "${IMAGE_INFO}" ]; then
+            read -r IMAGE_URI IMAGE_DIGEST <<< "${IMAGE_INFO}"
+          fi
+          if [ -n "${IMAGE_URI}" ] && [ -n "${IMAGE_DIGEST}" ]; then
+            IMAGE_WITH_DIGEST="${IMAGE_URI}@${IMAGE_DIGEST}"
             echo "image_exists=true" >> $GITHUB_OUTPUT
-            echo "latest_image=${IMAGE_URI}" >> $GITHUB_OUTPUT
+            echo "latest_image=${IMAGE_WITH_DIGEST}" >> $GITHUB_OUTPUT
           else
             echo "image_exists=false" >> $GITHUB_OUTPUT
           fi
@@ -732,10 +744,16 @@ jobs:
       - name: Check existing frontend image (prod)
         id: frontend-image-prod
         run: |
-          IMAGE_URI=$(gcloud artifacts docker images list "${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/${IMAGE_NAME_FRONTEND}" --format="value(IMAGE)" --limit=1 --sort-by=~UPDATE_TIME)
-          if [ -n "${IMAGE_URI}" ]; then
+          IMAGE_INFO=$(gcloud artifacts docker images list "${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/${IMAGE_NAME_FRONTEND}" --format="value(IMAGE,DIGEST)" --limit=1 --sort-by=~UPDATE_TIME)
+          IMAGE_URI=""
+          IMAGE_DIGEST=""
+          if [ -n "${IMAGE_INFO}" ]; then
+            read -r IMAGE_URI IMAGE_DIGEST <<< "${IMAGE_INFO}"
+          fi
+          if [ -n "${IMAGE_URI}" ] && [ -n "${IMAGE_DIGEST}" ]; then
+            IMAGE_WITH_DIGEST="${IMAGE_URI}@${IMAGE_DIGEST}"
             echo "image_exists=true" >> $GITHUB_OUTPUT
-            echo "latest_image=${IMAGE_URI}" >> $GITHUB_OUTPUT
+            echo "latest_image=${IMAGE_WITH_DIGEST}" >> $GITHUB_OUTPUT
           else
             echo "image_exists=false" >> $GITHUB_OUTPUT
           fi
