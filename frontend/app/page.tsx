@@ -60,15 +60,15 @@ export default async function DashboardPage() {
           <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-          <Link href="/cards#bank-accounts" className="group">
-            <Card className="group-hover:border-primary/40 transition-colors">
+          <Link href="/cards#bank-accounts" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">
                   Total Balance
                 </CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1">
                 <div className="text-2xl font-bold">£{totalBalance.toFixed(2)}</div>
                 <p className="text-xs text-muted-foreground">
                   Combined available balance (bank, overdraft, credit cards)
@@ -76,15 +76,15 @@ export default async function DashboardPage() {
               </CardContent>
             </Card>
           </Link>
-          <Link href="/cards#bank-accounts" className="group">
-            <Card className="group-hover:border-primary/40 transition-colors">
+          <Link href="/cards#bank-accounts" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">
                   Bank Account Balance
                 </CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1">
                 <div className="text-2xl font-bold">£{bankAvailable.toFixed(2)}</div>
                 <p className="text-xs text-muted-foreground">
                   Available across all bank accounts
@@ -92,15 +92,15 @@ export default async function DashboardPage() {
               </CardContent>
             </Card>
           </Link>
-          <Link href="/cards#overdraft-accounts" className="group">
-            <Card className="group-hover:border-primary/40 transition-colors">
+          <Link href="/cards#overdraft-accounts" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">
                   Overdraft Balance
                 </CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1">
                 <div className="text-2xl font-bold">£{overdraftAvailable.toFixed(2)}</div>
                 <p className="text-xs text-muted-foreground">
                   Limit £{overdraftLimit.toFixed(2)} · Used £{overdraftUsed.toFixed(2)}
@@ -108,15 +108,15 @@ export default async function DashboardPage() {
               </CardContent>
             </Card>
           </Link>
-          <Link href="/cards#credit-cards" className="group">
-            <Card className="group-hover:border-primary/40 transition-colors">
+          <Link href="/cards#credit-cards" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">
                   Credit Card Balance
                 </CardTitle>
                 <CreditCard className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1">
                 <div className="text-2xl font-bold">£{creditAvailable.toFixed(2)}</div>
                 <p className="text-xs text-muted-foreground">
                   Limit £{creditLimit.toFixed(2)} · Used £{creditUsed.toFixed(2)}
@@ -124,13 +124,13 @@ export default async function DashboardPage() {
               </CardContent>
             </Card>
           </Link>
-          <Link href="/rewards" className="group">
-            <Card className="group-hover:border-primary/40 transition-colors">
+          <Link href="/rewards" className="group h-full">
+            <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Rewards</CardTitle>
                 <Gift className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1">
                 <div className="text-2xl font-bold">0 pts</div>
                 <p className="text-xs text-muted-foreground">
                   Rewards balance will appear here
@@ -149,8 +149,8 @@ export default async function DashboardPage() {
                     Your latest bank transactions (last 10).
                   </CardDescription>
                 </div>
-                <Link href="/transactions">
-                  <Button variant="outline" size="sm">Show all transactions</Button>
+                <Link href="/transactions" className="inline-flex">
+                  <Button variant="outline" size="sm" className="cursor-pointer">Show all transactions</Button>
                 </Link>
               </div>
             </CardHeader>

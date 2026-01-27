@@ -4,6 +4,7 @@ import { TransactionsList } from "@/components/transactions-list";
 import { getCards } from "@/app/actions/card-actions";
 import { getCategories } from "@/app/actions/category-actions";
 import { getBankAccounts } from "@/app/actions/bank-actions";
+import { TransactionsHeaderActions } from "@/components/transactions-header-actions";
 
 export const metadata: Metadata = {
     title: "Transactions - CardSense",
@@ -33,6 +34,7 @@ export default async function TransactionsPage() {
                             Sync OpenBanking Transactions, filter, review, update and add cash transactions from one place.
                         </p>
                     </div>
+                    <TransactionsHeaderActions />
                 </div>
 
                 <div className="space-y-10">

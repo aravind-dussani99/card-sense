@@ -7,6 +7,10 @@ CREATE TABLE "Card" (
     "bankId" TEXT,
     "cardTypeId" TEXT,
     "cardCategory" TEXT,
+    "productCode" TEXT,
+    "planName" TEXT,
+    "benefitsJson" TEXT,
+    "tags" TEXT,
     "last4" TEXT NOT NULL,
     "fullCardNumber" TEXT,
     "expiryDate" TEXT,
@@ -28,6 +32,7 @@ CREATE TABLE "Card" (
 CREATE TABLE "Transaction" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "cardId" TEXT,
+    "providerTxId" TEXT,
     "merchant" TEXT NOT NULL,
     "amount" REAL NOT NULL,
     "category" TEXT NOT NULL,
@@ -106,8 +111,11 @@ CREATE TABLE "ToEntity" (
 -- CreateTable
 CREATE TABLE "DraftTransaction" (
     "id" TEXT NOT NULL PRIMARY KEY,
-    "emailId" TEXT NOT NULL,
+    "emailId" TEXT,
     "cardId" TEXT,
+    "bankAccountId" TEXT,
+    "providerTxId" TEXT,
+    "source" TEXT,
     "merchant" TEXT NOT NULL,
     "amount" REAL NOT NULL,
     "category" TEXT,
@@ -187,8 +195,15 @@ CREATE TABLE "BankAccount" (
     "providerAccountId" TEXT NOT NULL,
     "type" TEXT,
     "name" TEXT,
+    "productCode" TEXT,
+    "planName" TEXT,
+    "benefitsJson" TEXT,
+    "tags" TEXT,
     "currency" TEXT,
     "mask" TEXT,
+    "balance" REAL NOT NULL DEFAULT 0,
+    "availableBalance" REAL,
+    "limit" REAL,
     "status" TEXT NOT NULL DEFAULT 'active',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
@@ -205,13 +220,86 @@ CREATE TABLE "BankTransaction" (
     "description" TEXT,
     "merchant" TEXT,
     "category" TEXT,
+    "direction" TEXT DEFAULT 'debit',
     "date" DATETIME NOT NULL,
     "pending" BOOLEAN NOT NULL DEFAULT false,
+    "runningBalance" REAL,
     "raw" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "BankTransaction_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "BankAccount" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
+
+-- CreateTable
+CREATE TABLE "BankTransactionMeta" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "bankTransactionId" TEXT NOT NULL,
+    "openingBalance" REAL,
+    "closingBalance" REAL,
+    "fromEntity" TEXT,
+    "viaEntity" TEXT,
+    "toEntity" TEXT,
+    "headAccount" TEXT,
+    "subCategory" TEXT,
+    "remarks" TEXT,
+    "attachmentsJson" TEXT,
+    "comments" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "BankTransactionMeta_bankTransactionId_fkey" FOREIGN KEY ("bankTransactionId") REFERENCES "BankTransaction" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "BankAccountCredential" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "bankAccountId" TEXT NOT NULL,
+    "label" TEXT,
+    "encryptedPayload" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "BankAccountCredential_bankAccountId_fkey" FOREIGN KEY ("bankAccountId") REFERENCES "BankAccount" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "MerchantCategoryRule" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "merchantKey" TEXT NOT NULL,
+    "category" TEXT NOT NULL,
+    "source" TEXT NOT NULL DEFAULT 'provider',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "ChatSession" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "title" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- CreateTable
+CREATE TABLE "CardCredential" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "cardId" TEXT NOT NULL,
+    "label" TEXT,
+    "encryptedPayload" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "CardCredential_cardId_fkey" FOREIGN KEY ("cardId") REFERENCES "Card" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "ChatMessage" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "chatId" TEXT NOT NULL,
+    "role" TEXT NOT NULL,
+    "content" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "ChatMessage_chatId_fkey" FOREIGN KEY ("chatId") REFERENCES "ChatSession" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Transaction_providerTxId_key" ON "Transaction"("providerTxId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Category_name_key" ON "Category"("name");
@@ -232,10 +320,28 @@ CREATE UNIQUE INDEX "ToEntity_name_key" ON "ToEntity"("name");
 CREATE UNIQUE INDEX "DraftTransaction_emailId_key" ON "DraftTransaction"("emailId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "DraftTransaction_providerTxId_key" ON "DraftTransaction"("providerTxId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Offer_emailId_key" ON "Offer"("emailId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ProcessedEmail_emailId_key" ON "ProcessedEmail"("emailId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "BankAccount_providerAccountId_key" ON "BankAccount"("providerAccountId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "BankTransaction_providerTransactionId_key" ON "BankTransaction"("providerTransactionId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "BankTransactionMeta_bankTransactionId_key" ON "BankTransactionMeta"("bankTransactionId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "BankAccountCredential_bankAccountId_key" ON "BankAccountCredential"("bankAccountId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MerchantCategoryRule_merchantKey_key" ON "MerchantCategoryRule"("merchantKey");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CardCredential_cardId_key" ON "CardCredential"("cardId");
