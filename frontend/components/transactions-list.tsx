@@ -33,7 +33,7 @@ export function TransactionsList({ cards, categories, accounts }: TransactionsLi
                     subCategories: (category.subCategories || []).map((sub: SubCategory) => ({
                         id: sub.id,
                         name: sub.name,
-                        categoryId: sub.categoryId,
+                        categoryId: sub.categoryId || category.id,
                     })),
                 }))}
             />

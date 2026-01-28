@@ -278,9 +278,11 @@ export function ViewAccountDialog({
                 <AlertTitle>Passphrase required</AlertTitle>
                 <AlertDescription className="flex flex-wrap items-center gap-2">
                   <span>Set a passphrase in Settings to view sensitive fields.</span>
-                  <Button asChild size="sm" variant="outline">
-                    <Link href="/settings">Go to Settings</Link>
-                  </Button>
+                  <Link href="/settings" className="inline-flex">
+                    <Button size="sm" variant="outline">
+                      Go to Settings
+                    </Button>
+                  </Link>
                 </AlertDescription>
               </Alert>
             )}

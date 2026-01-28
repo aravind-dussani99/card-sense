@@ -27,11 +27,13 @@ type CredentialMeta = {
 
 type DecryptedCardCredentials = {
   fullCardNumber?: string;
+  nameOnCard?: string;
   expiryDate?: string;
   cvv?: string;
   pin?: string;
-  cardPassword?: string;
-  memo?: string;
+  appPassword?: string;
+  memorableInfo?: string;
+  notes?: string;
   label?: string;
 };
 
