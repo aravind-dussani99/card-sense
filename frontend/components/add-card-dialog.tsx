@@ -27,6 +27,7 @@ import { getCardTypes } from "@/app/actions/card-type-actions";
 import { Bank, CardType } from "@/lib/types";
 import { createCardCredential } from "@/app/actions/credential-actions";
 import { encryptPayload } from "@/lib/vault";
+import { requireData } from "@/lib/api-result";
 
 interface AddCardDialogProps {
     open?: boolean;
@@ -164,11 +165,12 @@ export function AddCardDialog({ open: controlledOpen, onOpenChange, prefillData 
                     return;
                 }
                 try {
+                    const savedCard = requireData(result, "Card saved, but credential storage was skipped due to missing card id.");
                     const payload = await encryptPayload(credentialsPassphrase, {
                         ...credentialsData,
                         label: credentialsLabel || name,
                     });
-                    await createCardCredential(result.data.id, payload, credentialsLabel || name);
+                    await createCardCredential(savedCard.id, payload, credentialsLabel || name);
                 } catch (error) {
                     console.error("Failed to store card credentials:", error);
                     alert("Card saved, but credentials could not be stored.");

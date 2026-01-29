@@ -33,6 +33,9 @@ type LegacyTransaction = {
     loanTo?: string;
     loanFrom?: string;
     date: string | Date;
+    merchant?: string;
+    amount?: number;
+    description?: string;
 };
 
 interface EditTransactionDialogProps {

@@ -32,8 +32,8 @@ export default async function BalancesPage() {
         amount: tx.amount,
         transactionType: tx.amount < 0 ? "expense" : "income",
         direction: tx.amount < 0 ? "debit" : "credit",
-        loanTo: tx.loanTo || null,
-        loanFrom: tx.loanFrom || null,
+        loanTo: null,
+        loanFrom: null,
         date: tx.date ? new Date(tx.date).toISOString() : new Date().toISOString(),
         notes: null,
         remarks: tx.meta?.remarks || null,
@@ -49,7 +49,13 @@ export default async function BalancesPage() {
             </div>
             <div className="flex-1">
                     <BalanceDashboard 
-                        cards={cards} 
+                        cards={cards.map((card) => ({
+                            id: card.id,
+                            name: card.name ?? null,
+                            last4: card.last4 ?? null,
+                            balance: card.balance ?? undefined,
+                            limit: card.limit ?? undefined,
+                        }))}
                         accounts={bankAccounts as BankAccount[]}
                         categories={categories} 
                         initialTransactions={mapped}

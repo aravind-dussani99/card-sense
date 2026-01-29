@@ -218,8 +218,8 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
         const totalExpenses = expenses.reduce((sum, t) => sum + t.amount, 0);
         const totalLoansGiven = loansGiven.reduce((sum, t) => sum + t.amount, 0);
         const totalLoansReceived = loansReceived.reduce((sum, t) => sum + t.amount, 0);
-        const totalCardBalance = cards.reduce((sum, c) => sum + c.balance, 0);
-        const totalCardLimit = cards.reduce((sum, c) => sum + c.limit, 0);
+        const totalCardBalance = cards.reduce((sum, c) => sum + (c.balance ?? 0), 0);
+        const totalCardLimit = cards.reduce((sum, c) => sum + (c.limit ?? 0), 0);
         const availableCredit = totalCardLimit - totalCardBalance;
 
         return {
@@ -250,12 +250,12 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
         return cards.map(card => {
             const cardTransactions = filteredTransactions.filter(t => t.cardId === card.id && (t.transactionType === "expense" || !t.transactionType));
             const totalSpent = cardTransactions.reduce((sum, t) => sum + t.amount, 0);
-            const outstanding = card.balance; // Current balance is what's outstanding
+            const outstanding = card.balance ?? 0; // Current balance is what's outstanding
             return {
                 ...card,
                 totalSpent,
                 outstanding,
-                utilization: card.limit > 0 ? (card.balance / card.limit) * 100 : 0,
+                utilization: (card.limit ?? 0) > 0 ? ((card.balance ?? 0) / (card.limit ?? 0)) * 100 : 0,
             };
         });
     }, [cards, filteredTransactions]);
@@ -920,7 +920,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                 <CardContent>
                                     <div className="text-2xl font-bold">${card.outstanding.toFixed(2)}</div>
                                     <p className="text-xs text-muted-foreground mt-1">
-                                        {card.utilization.toFixed(1)}% of ${card.limit.toFixed(2)} limit
+                                        {card.utilization.toFixed(1)}% of ${(card.limit ?? 0).toFixed(2)} limit
                                     </p>
                                 </CardContent>
                             </Card>

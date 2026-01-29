@@ -19,7 +19,10 @@ import { clearPassphraseMarker, passphraseMarkerExists, setPassphraseMarker } fr
 export function SettingsContent({ connections = [] }: { connections?: BankConnection[] }) {
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [localConnections, setLocalConnections] = useState<BankConnection[]>(connections);
-    const [passphraseSet, setPassphraseSet] = useState(() => passphraseMarkerExists());
+    const [passphraseSet, setPassphraseSet] = useState(() => {
+        if (typeof window === "undefined") return false;
+        return passphraseMarkerExists();
+    });
     const [passphrase, setPassphrase] = useState("");
     const [passphraseConfirm, setPassphraseConfirm] = useState("");
     const [passphraseStatus, setPassphraseStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);

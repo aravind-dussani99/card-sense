@@ -274,17 +274,59 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                     </CardHeader>
                     <CardContent>
                         <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
-                            {cards.map((card) => (
-                                <div key={card.id} className="relative w-full">
-                                    <div className="absolute left-3 top-3 text-gray-500">
-                                        <CardIcon className="h-4 w-4" />
+                            {cards.map((card) => {
+                                const displayCard = {
+                                    id: card.id,
+                                    name: card.name || "Card",
+                                    nameOnCard: null,
+                                    bank: card.bank || "Bank",
+                                    cardType: card.cardTypeId ? { name: card.cardTypeId } : null,
+                                    cardCategory: null,
+                                    last4: card.last4 || "••••",
+                                    fullCardNumber: null,
+                                    expiryDate: null,
+                                    cvv: null,
+                                    limit: typeof card.limit === "number" ? card.limit : 0,
+                                    balance: typeof card.balance === "number" ? card.balance : 0,
+                                    cutoffDate: card.cutoffDate || 1,
+                                    dueDate: card.dueDate || 1,
+                                    color: card.color || "bg-gray-800",
+                                    last3DueDates: null,
+                                };
+                                const editCard = {
+                                    id: displayCard.id,
+                                    name: displayCard.name,
+                                    nameOnCard: displayCard.nameOnCard,
+                                    bank: displayCard.bank,
+                                    bankId: card.bankId || null,
+                                    last4: displayCard.last4,
+                                    fullCardNumber: displayCard.fullCardNumber,
+                                    expiryDate: displayCard.expiryDate,
+                                    cvv: displayCard.cvv,
+                                    cardTypeId: card.cardTypeId || null,
+                                    cardType: displayCard.cardType
+                                        ? { id: card.cardTypeId || displayCard.cardType.name, name: displayCard.cardType.name }
+                                        : null,
+                                    limit: displayCard.limit,
+                                    balance: displayCard.balance,
+                                    cutoffDate: displayCard.cutoffDate,
+                                    dueDate: displayCard.dueDate,
+                                    color: displayCard.color,
+                                    statementPassword: null,
+                                    cardCategory: displayCard.cardCategory,
+                                };
+                                return (
+                                    <div key={card.id} className="relative w-full">
+                                        <div className="absolute left-3 top-3 text-gray-500">
+                                            <CardIcon className="h-4 w-4" />
+                                        </div>
+                                        <CardDisplay card={displayCard} />
+                                        <div className="absolute bottom-4 right-4">
+                                            <EditCardDialog card={editCard} triggerVariant="icon" />
+                                        </div>
                                     </div>
-                                    <CardDisplay card={card} />
-                                    <div className="absolute bottom-4 right-4">
-                                        <EditCardDialog card={card} triggerVariant="icon" />
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                             {cards.length < 4 &&
                                 Array.from({ length: 4 - cards.length }).map((_, idx) => (
                                     <PlaceholderTile key={`card-placeholder-${idx}`} label="Credit card" />

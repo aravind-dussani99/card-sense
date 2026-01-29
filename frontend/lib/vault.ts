@@ -22,6 +22,7 @@ function base64ToBuffer(value: string) {
 
 async function deriveKey(passphrase: string, salt: Uint8Array) {
   const enc = new TextEncoder();
+  const saltBuffer = new Uint8Array(salt).slice().buffer;
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     enc.encode(passphrase),
@@ -32,7 +33,7 @@ async function deriveKey(passphrase: string, salt: Uint8Array) {
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
+      salt: saltBuffer,
       iterations: 310000,
       hash: "SHA-256",
     },

@@ -408,9 +408,12 @@ export function EditCardDialog({ card, triggerVariant = "default" }: EditCardDia
                                         <AlertTitle>Passphrase required</AlertTitle>
                                         <AlertDescription className="flex flex-wrap items-center gap-2">
                                             <span>Set a passphrase in Settings to view sensitive fields.</span>
-                                            <Button asChild size="sm" variant="outline">
-                                                <Link href="/settings">Go to Settings</Link>
-                                            </Button>
+                                            <Link
+                                                href="/settings"
+                                                className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1 text-sm hover:bg-accent"
+                                            >
+                                                Go to Settings
+                                            </Link>
                                         </AlertDescription>
                                     </Alert>
                                 )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { RefreshCw, AlertCircle, CheckCircle2, Eye, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -215,7 +215,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
 
     const renderPageButtons = () => {
         const maxButtons = 5;
-        const buttons: JSX.Element[] = [];
+        const buttons: ReactNode[] = [];
         let start = Math.max(1, meta.page - 2);
         let end = Math.min(totalPages, start + maxButtons - 1);
         if (end - start < maxButtons - 1) {

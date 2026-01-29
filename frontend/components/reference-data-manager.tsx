@@ -201,9 +201,9 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
 
     const handleUpdateSubCategory = async () => {
         if (!editingSub) return;
-        setSubLoading(true);
+        setLoading(true);
         const result = await updateSubCategory(editingSub.id, editingSub.name);
-        setSubLoading(false);
+        setLoading(false);
         if (result.success) {
             setEditingSub(null);
             await loadData();
@@ -271,8 +271,8 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
                                             id: ct.id,
                                             name: ct.name,
                                             type: "cardTypes",
-                                            icon: ct.icon,
-                                            color: ct.color,
+                                            icon: ct.icon ?? undefined,
+                                            color: ct.color ?? undefined,
                                         })}>
                                             <Edit2 className="h-3 w-3" />
                                         </Button>
@@ -312,8 +312,8 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
                                             id: bank.id,
                                             name: bank.name,
                                             type: "banks",
-                                            icon: bank.icon,
-                                            color: bank.color,
+                                            icon: bank.icon ?? undefined,
+                                            color: bank.color ?? undefined,
                                         })}>
                                             <Edit2 className="h-3 w-3" />
                                         </Button>
@@ -364,13 +364,13 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
                                                 variant="ghost"
                                                 size="sm"
                                                 className="h-6 w-6 p-0"
-                                                onClick={() => handleEdit({
-                                                    id: category.id,
-                                                    name: category.name,
-                                                    type: "categories",
-                                                    icon: category.icon,
-                                                    color: category.color,
-                                                })}
+                                            onClick={() => handleEdit({
+                                                id: category.id,
+                                                name: category.name,
+                                                type: "categories",
+                                                icon: category.icon ?? undefined,
+                                                color: category.color ?? undefined,
+                                            })}
                                             >
                                                 <Edit2 className="h-3 w-3" />
                                             </Button>
