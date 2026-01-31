@@ -29,12 +29,14 @@ export default async function DashboardPage() {
     return type.includes("overdraft") || name.includes("overdraft");
   };
   const overdraftAccounts = bankAccounts.filter(isOverdraft);
-  const cardAccounts = bankAccounts.filter((account) =>
-    (account.type || "").toLowerCase().includes("card")
-  );
-  const standardAccounts = bankAccounts.filter(
-    (account) => !isOverdraft(account) && !(account.type || "").toLowerCase().includes("card")
-  );
+  const cardAccounts = bankAccounts.filter((account) => {
+    const type = (account.type || "").toLowerCase();
+    return type.includes("card") || type.includes("credit");
+  });
+  const standardAccounts = bankAccounts.filter((account) => {
+    const type = (account.type || "").toLowerCase();
+    return !isOverdraft(account) && !type.includes("card") && !type.includes("credit");
+  });
 
   const bankAvailable = standardAccounts.reduce(
     (sum, acct) => sum + toNumber(acct.availableBalance ?? acct.balance),
@@ -48,13 +50,6 @@ export default async function DashboardPage() {
   const overdraftUsed = Math.max(0, overdraftLimit - overdraftAvailable);
 
   const cardAccountLimit = cardAccounts.reduce((sum, acct) => sum + toNumber(acct.limit), 0);
-  const cardAccountAvailable = cardAccounts.reduce((sum, acct) => {
-    if (typeof acct.availableBalance === "number") return sum + acct.availableBalance;
-    if (typeof acct.limit === "number" && typeof acct.balance === "number") {
-      return sum + Math.max(0, acct.limit - acct.balance);
-    }
-    return sum;
-  }, 0);
   const cardAccountUsed = cardAccounts.reduce((sum, acct) => {
     if (typeof acct.limit === "number" && typeof acct.availableBalance === "number") {
       return sum + Math.max(0, acct.limit - acct.availableBalance);

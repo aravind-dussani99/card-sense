@@ -51,11 +51,19 @@ const PlaceholderTile = ({ label }: { label: string }) => (
 export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentProps) {
     const overdraftAccounts = useMemo(() => bankAccounts.filter(isOverdraft), [bankAccounts]);
     const cardAccounts = useMemo(
-        () => bankAccounts.filter((acct) => (acct.type || "").toLowerCase().includes("card")),
+        () =>
+            bankAccounts.filter((acct) => {
+                const type = (acct.type || "").toLowerCase();
+                return type.includes("card") || type.includes("credit");
+            }),
         [bankAccounts]
     );
     const standardAccounts = useMemo(
-        () => bankAccounts.filter((acct) => !isOverdraft(acct) && !(acct.type || "").toLowerCase().includes("card")),
+        () =>
+            bankAccounts.filter((acct) => {
+                const type = (acct.type || "").toLowerCase();
+                return !isOverdraft(acct) && !type.includes("card") && !type.includes("credit");
+            }),
         [bankAccounts]
     );
     const hasBankAccounts = standardAccounts.length > 0;
@@ -105,13 +113,6 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
     );
     const overdraftUsed = Math.max(0, overdraftLimit - overdraftAvailable);
     const cardAccountLimit = cardAccounts.reduce((sum, acct) => sum + toNumber(acct.limit), 0);
-    const cardAccountAvailable = cardAccounts.reduce((sum, acct) => {
-        if (typeof acct.availableBalance === "number") return sum + acct.availableBalance;
-        if (typeof acct.limit === "number" && typeof acct.balance === "number") {
-            return sum + Math.max(0, acct.limit - acct.balance);
-        }
-        return sum;
-    }, 0);
     const cardAccountUsed = cardAccounts.reduce((sum, acct) => {
         if (typeof acct.limit === "number" && typeof acct.availableBalance === "number") {
             return sum + Math.max(0, acct.limit - acct.availableBalance);

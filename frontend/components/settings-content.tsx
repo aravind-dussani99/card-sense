@@ -9,7 +9,7 @@ import Link from "next/link"
 import { BankConnect } from "@/components/bank-connect"
 import { BankCredentialsManager } from "@/components/bank-credentials-manager"
 import { CardCredentialsManager } from "@/components/card-credentials-manager"
-import { useEffect, useState } from "react"
+import { useSyncExternalStore, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { apiFetch } from "@/lib/api"
 import { getErrorMessage } from "@/lib/errors"
@@ -18,30 +18,31 @@ import { clearPassphraseMarker, passphraseMarkerExists, setPassphraseMarker } fr
 import { getStoredVisibility, setStoredDuration } from "@/lib/balance-visibility"
 
 export function SettingsContent({ connections = [] }: { connections?: BankConnection[] }) {
+    const subscribePassphrase = (callback: () => void) => {
+        if (typeof window === "undefined") return () => {};
+        window.addEventListener("cardsense-passphrase", callback);
+        return () => window.removeEventListener("cardsense-passphrase", callback);
+    };
+    const passphraseSet = useSyncExternalStore(
+        subscribePassphrase,
+        () => (typeof window !== "undefined" ? passphraseMarkerExists() : false),
+        () => false
+    );
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [localConnections, setLocalConnections] = useState<BankConnection[]>(connections);
-    const [passphraseSet, setPassphraseSet] = useState(false);
-    const [passphraseLoaded, setPassphraseLoaded] = useState(false);
     const [passphrase, setPassphrase] = useState("");
     const [passphraseConfirm, setPassphraseConfirm] = useState("");
     const [passphraseStatus, setPassphraseStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
-    const [balanceDuration, setBalanceDuration] = useState(30);
-    const [customDuration, setCustomDuration] = useState("");
-    const [durationMode, setDurationMode] = useState("30");
-
-
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        setPassphraseSet(passphraseMarkerExists());
-        setPassphraseLoaded(true);
-        const stored = getStoredVisibility();
-        setBalanceDuration(stored.duration);
-        const preset = ["10", "30", "60", "120"].includes(String(stored.duration))
-            ? String(stored.duration)
-            : "custom";
-        setDurationMode(preset);
-        if (preset === "custom") setCustomDuration(String(stored.duration));
-    }, []);
+    const initialVisibility = getStoredVisibility();
+    const initialDurationMode = ["10", "30", "60", "120"].includes(String(initialVisibility.duration))
+        ? String(initialVisibility.duration)
+        : "custom";
+    const [balanceDuration, setBalanceDuration] = useState(initialVisibility.duration);
+    const [durationMode, setDurationMode] = useState(initialDurationMode);
+    const [customDuration, setCustomDuration] = useState(
+        initialDurationMode === "custom" ? String(initialVisibility.duration) : ""
+    );
+    const passphraseLoaded = true;
 
     const handleDisconnect = async (id: string, label: string) => {
         setFeedback(null);
@@ -66,7 +67,6 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
         }
         try {
             await setPassphraseMarker(passphrase);
-            setPassphraseSet(true);
             setPassphrase("");
             setPassphraseConfirm("");
             setPassphraseStatus({ type: "success", message: "Passphrase saved on this device." });
@@ -78,7 +78,6 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
 
     const handlePassphraseClear = () => {
         clearPassphraseMarker();
-        setPassphraseSet(false);
         setPassphrase("");
         setPassphraseConfirm("");
         setPassphraseStatus({ type: "success", message: "Passphrase cleared on this device." });

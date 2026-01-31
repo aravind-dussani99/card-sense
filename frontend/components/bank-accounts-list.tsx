@@ -86,7 +86,7 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                             ? `${sortCode.slice(0, 2)}-${sortCode.slice(2, 4)}-${sortCode.slice(4)}`
                             : sortCode;
                     const typeValue = (acct.type || "").toLowerCase();
-                    const isCard = typeValue.includes("card");
+                    const isCard = typeValue.includes("card") || typeValue.includes("credit");
                     const isOverdraft = typeValue.includes("overdraft");
                     const cardMask = acct.mask || accountNumber.slice(-4) || "••••";
                     const accountRef = isCard

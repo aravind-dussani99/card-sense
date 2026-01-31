@@ -2,7 +2,7 @@
 
 import { Eye, EyeOff, DollarSign, CreditCard, Wallet, ShieldAlert } from "lucide-react";
 import { useBalanceVisibility } from "@/lib/balance-visibility";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
 type DashboardKpisProps = {

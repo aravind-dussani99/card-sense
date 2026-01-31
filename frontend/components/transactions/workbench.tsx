@@ -1008,7 +1008,14 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                                 </td>
                                                 <td className="px-4 py-3">{draft.headAccount || "—"}</td>
                                                 <td className="px-4 py-3">
-                                                    <div className="font-medium text-slate-900">{draft.category || "—"}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-medium text-slate-900">{draft.category || "—"}</span>
+                                                        {draft.categorySource === "internet" && (
+                                                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500">
+                                                                Internet
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                     <div className="text-xs text-muted-foreground">
                                                         {categorySourceLabel(draft.categorySource)}
                                                     </div>

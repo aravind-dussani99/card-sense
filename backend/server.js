@@ -73,6 +73,27 @@ const deriveUkAccountDetails = (value) => {
   return { sortCode: match[1], accountNumber: match[2] };
 };
 
+const normalizeTypeLabel = (value) => String(value || "").toLowerCase();
+
+const inferAccountType = (acct) => {
+  const typeHints = [
+    acct.account_type,
+    acct.type,
+    acct.account_subtype,
+    acct.account_sub_type,
+    acct.product_code,
+    acct.productCode,
+    acct.display_name,
+    acct.name,
+  ]
+    .filter(Boolean)
+    .map((value) => normalizeTypeLabel(value));
+  const joined = typeHints.join(" ");
+  if (joined.includes("credit") || joined.includes("card") || joined.includes("cc")) return "card";
+  if (joined.includes("overdraft")) return "overdraft";
+  return acct.account_type || acct.type || "account";
+};
+
 const resolveTransactionCategory = async (tx, userId) => {
   const merchantKey = buildMerchantKey(tx);
   const providerCategory = getProviderCategory(tx);
@@ -1274,12 +1295,13 @@ app.get("/api/bank/callback", async (req, res) => {
       const derived = deriveUkAccountDetails(rawIban);
       const accountNumber = acct.account_number?.number || derived.accountNumber || null;
       const sortCode = acct.account_number?.sort_code || derived.sortCode || null;
+      const inferredType = inferAccountType(acct);
       await prisma.bankAccount.upsert({
         where: { userId_providerAccountId: { userId, providerAccountId: acct.account_id } },
         update: {
           userId,
           connectionId: connection.id,
-          type: acct.account_type || acct.type || null,
+          type: inferredType,
           name: acct.display_name || acct.account_id || null,
           currency: acct.currency || null,
           mask: acct.account_number?.iban || acct.account_number?.number?.slice(-4) || null,
@@ -1292,7 +1314,7 @@ app.get("/api/bank/callback", async (req, res) => {
           userId,
           connectionId: connection.id,
           providerAccountId: acct.account_id,
-          type: acct.account_type || acct.type || null,
+          type: inferredType,
           name: acct.display_name || acct.account_id || null,
           currency: acct.currency || null,
           mask: acct.account_number?.iban || acct.account_number?.number?.slice(-4) || null,
@@ -1469,7 +1491,7 @@ app.post("/api/bank/sync", async (req, res) => {
           ...accounts
             .map((acct) => ({
               id: acct.account_id,
-              type: acct.account_type || acct.type || "account",
+              type: inferAccountType(acct),
               name: acct.display_name || acct.account_id,
               currency: acct.currency,
               mask: acct.account_number?.iban || acct.account_number?.number?.slice(-4),

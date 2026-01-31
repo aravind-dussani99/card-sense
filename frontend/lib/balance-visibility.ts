@@ -31,16 +31,9 @@ export const setStoredVisible = (visible: boolean) => {
 };
 
 export const useBalanceVisibility = () => {
-  const [visible, setVisible] = useState(false);
-  const [duration, setDuration] = useState(30);
+  const [visible, setVisible] = useState(() => getStoredVisibility().visible);
+  const [duration, setDuration] = useState(() => getStoredVisibility().duration);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = getStoredVisibility();
-    setVisible(stored.visible);
-    setDuration(stored.duration);
-  }, []);
 
   useEffect(() => {
     if (!visible) {
