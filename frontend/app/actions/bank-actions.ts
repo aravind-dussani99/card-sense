@@ -78,10 +78,16 @@ export async function addBankAccount(data: {
     type?: string;
     bankName?: string;
     mask?: string;
+    accountNumber?: string;
+    sortCode?: string;
     currency?: string;
     balance?: number;
     availableBalance?: number;
     limit?: number;
+    statementBalance?: number;
+    statementDate?: string;
+    statementDueDate?: string;
+    statementPaidAmount?: number;
 }) {
     try {
         return await apiFetch<ApiResponse<BankAccount>>("/api/bank/accounts", {
@@ -102,9 +108,15 @@ export async function updateBankAccount(
         currency?: string;
         mask?: string;
         tags?: string;
+        accountNumber?: string;
+        sortCode?: string;
         balance?: number;
         availableBalance?: number;
         limit?: number;
+        statementBalance?: number;
+        statementDate?: string;
+        statementDueDate?: string;
+        statementPaidAmount?: number;
     }
 ) {
     try {

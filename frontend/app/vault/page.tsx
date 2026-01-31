@@ -1,5 +1,6 @@
 import { Metadata } from "next";
 import { MainNav } from "@/components/main-nav";
+import { AuthMenu } from "@/components/auth-menu";
 import { VaultClient } from "@/components/vault-client";
 
 export const metadata: Metadata = {
@@ -16,6 +17,9 @@ export default async function VaultPage() {
                         CardSense
                     </h1>
                     <MainNav className="mx-6" />
+                    <div className="ml-auto flex items-center gap-3">
+                        <AuthMenu />
+                    </div>
                 </div>
             </div>
             <div className="mx-auto w-full max-w-5xl px-6 py-10 flex-1">

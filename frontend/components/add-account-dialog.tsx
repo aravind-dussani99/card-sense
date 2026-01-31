@@ -84,6 +84,7 @@ export function AddAccountDialog({ open: controlledOpen, onOpenChange, prefillDa
         const selectedBankData = banks.find(b => b.id === selectedBank);
         const name = (formData.get("name") as string)?.trim();
         const accountNumber = (formData.get("accountNumber") as string)?.trim();
+        const sortCode = (formData.get("sortCode") as string)?.trim();
         const limit = Number(formData.get("limit") || 0);
         const currentBalance = Number(formData.get("currentBalance") || 0);
 
@@ -103,6 +104,11 @@ export function AddAccountDialog({ open: controlledOpen, onOpenChange, prefillDa
             setLoading(false);
             return;
         }
+        if (sortCode && sortCode.replace(/[^0-9]/g, "").length < 6) {
+            alert("Please enter a 6 digit sort code");
+            setLoading(false);
+            return;
+        }
 
         // Use last 4 digits of account number
         const last4 = accountNumber.slice(-4);
@@ -112,6 +118,8 @@ export function AddAccountDialog({ open: controlledOpen, onOpenChange, prefillDa
             type: "account",
             bankName: selectedBankData?.name || "",
             mask: last4,
+            accountNumber,
+            sortCode: sortCode ? sortCode.replace(/[^0-9]/g, "") : undefined,
             currency: "USD",
             balance: currentBalance,
             availableBalance: currentBalance,
@@ -208,18 +216,31 @@ export function AddAccountDialog({ open: controlledOpen, onOpenChange, prefillDa
                             </div>
                         </div>
 
-                        {/* Row 2: Account Number */}
-                        <div className="space-y-2">
-                            <Label htmlFor="accountNumber">Account Number (Last 4 digits minimum)</Label>
-                            <Input
-                                id="accountNumber"
-                                name="accountNumber"
-                                placeholder="Enter account number (last 4 will be used)"
-                                required
-                            />
-                            <p className="text-xs text-muted-foreground">
-                                Enter full account number or at least last 4 digits
-                            </p>
+                        {/* Row 2: Account Number + Sort Code */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="accountNumber">Account Number (Last 4 digits minimum)</Label>
+                                <Input
+                                    id="accountNumber"
+                                    name="accountNumber"
+                                    placeholder="Enter account number"
+                                    required
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Enter full account number or at least last 4 digits
+                                </p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="sortCode">Sort Code (UK)</Label>
+                                <Input
+                                    id="sortCode"
+                                    name="sortCode"
+                                    placeholder="e.g. 20-27-28"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Optional, 6 digits for UK bank accounts
+                                </p>
+                            </div>
                         </div>
 
                         {/* Row 3: Balance Limit and Current Balance */}

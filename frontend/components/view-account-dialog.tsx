@@ -28,6 +28,15 @@ type BankAccountDisplay = {
   currency?: string | null;
   providerAccountId?: string | null;
   mask?: string | null;
+  accountNumber?: string | null;
+  sortCode?: string | null;
+  statementBalance?: number | null;
+  statementDate?: string | null;
+  statementDueDate?: string | null;
+  statementPaidAmount?: number | null;
+  statementPaidComputed?: number | null;
+  statementPayable?: number | null;
+  statementDueInDays?: number | null;
   tags?: string | null;
   balance?: number | null;
   availableBalance?: number | null;
@@ -64,12 +73,19 @@ export function ViewAccountDialog({
   const [secureUnlocked, setSecureUnlocked] = useState(false);
   const [secureError, setSecureError] = useState<string | null>(null);
   const [secureData, setSecureData] = useState<AccountCredentials>({});
+  const [shareOpen, setShareOpen] = useState(false);
   const [accountData, setAccountData] = useState({
     name: account.name || "",
     type: account.type || "account",
     currency: account.currency || "",
     mask: account.mask || "",
     bankName: account.tags?.startsWith("bank:") ? account.tags.replace("bank:", "") : "",
+    accountNumber: account.accountNumber || "",
+    sortCode: account.sortCode || "",
+    statementBalance: account.statementBalance ?? 0,
+    statementDate: account.statementDate ? account.statementDate.slice(0, 10) : "",
+    statementDueDate: account.statementDueDate ? account.statementDueDate.slice(0, 10) : "",
+    statementPaidAmount: account.statementPaidAmount ?? 0,
     balance: account.balance ?? 0,
     availableBalance: account.availableBalance ?? account.balance ?? 0,
     limit: account.limit ?? 0,
@@ -81,6 +97,23 @@ export function ViewAccountDialog({
     if (account.tags?.startsWith("bank:")) return account.tags.replace("bank:", "");
     return "Bank";
   }, [account.connection, account.tags]);
+
+  const isCardType = useMemo(() => (accountData.type || "").toLowerCase().includes("card"), [accountData.type]);
+  const computedPayable = useMemo(() => {
+    const statementBalance = Number(accountData.statementBalance) || 0;
+    const paidManual = Number(accountData.statementPaidAmount) || 0;
+    const paidComputed = typeof account.statementPaidComputed === "number" ? account.statementPaidComputed : 0;
+    return Math.max(0, statementBalance - Math.max(paidManual, paidComputed));
+  }, [account.statementPaidComputed, accountData.statementBalance, accountData.statementPaidAmount]);
+  const computedDueDays = useMemo(() => {
+    if (account.statementDueInDays !== null && account.statementDueInDays !== undefined) {
+      return account.statementDueInDays;
+    }
+    if (!accountData.statementDueDate) return null;
+    const due = new Date(accountData.statementDueDate);
+    const now = new Date();
+    return Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  }, [account.statementDueInDays, accountData.statementDueDate]);
 
   useEffect(() => {
     if (open) {
@@ -95,6 +128,12 @@ export function ViewAccountDialog({
         currency: account.currency || "",
         mask: account.mask || "",
         bankName: account.tags?.startsWith("bank:") ? account.tags.replace("bank:", "") : "",
+        accountNumber: account.accountNumber || "",
+        sortCode: account.sortCode || "",
+        statementBalance: account.statementBalance ?? 0,
+        statementDate: account.statementDate ? account.statementDate.slice(0, 10) : "",
+        statementDueDate: account.statementDueDate ? account.statementDueDate.slice(0, 10) : "",
+        statementPaidAmount: account.statementPaidAmount ?? 0,
         balance: account.balance ?? 0,
         availableBalance: account.availableBalance ?? account.balance ?? 0,
         limit: account.limit ?? 0,
@@ -148,6 +187,12 @@ export function ViewAccountDialog({
         currency: accountData.currency || undefined,
         mask: accountData.mask || undefined,
         tags: tagName || undefined,
+        accountNumber: accountData.accountNumber || undefined,
+        sortCode: accountData.sortCode || undefined,
+        statementBalance: Number(accountData.statementBalance) || 0,
+        statementDate: accountData.statementDate || undefined,
+        statementDueDate: accountData.statementDueDate || undefined,
+        statementPaidAmount: Number(accountData.statementPaidAmount) || 0,
         balance: Number(accountData.balance) || 0,
         availableBalance: Number(accountData.availableBalance) || 0,
         limit: Number(accountData.limit) || 0,
@@ -241,6 +286,90 @@ export function ViewAccountDialog({
               />
             </div>
           </div>
+
+          {isCardType && (
+            <div className="rounded-lg border p-4 space-y-3">
+              <div className="text-sm font-semibold">Statement & Payable</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="statementBalance">Statement Balance</Label>
+                  <Input
+                    id="statementBalance"
+                    type="number"
+                    value={accountData.statementBalance}
+                    onChange={(e) => setAccountData((prev) => ({ ...prev, statementBalance: Number(e.target.value) }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="statementPaidAmount">Paid so far (manual)</Label>
+                  <Input
+                    id="statementPaidAmount"
+                    type="number"
+                    value={accountData.statementPaidAmount}
+                    onChange={(e) => setAccountData((prev) => ({ ...prev, statementPaidAmount: Number(e.target.value) }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="statementDate">Statement Date</Label>
+                  <Input
+                    id="statementDate"
+                    type="date"
+                    value={accountData.statementDate}
+                    onChange={(e) => setAccountData((prev) => ({ ...prev, statementDate: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="statementDueDate">Statement Due Date</Label>
+                  <Input
+                    id="statementDueDate"
+                    type="date"
+                    value={accountData.statementDueDate}
+                    onChange={(e) => setAccountData((prev) => ({ ...prev, statementDueDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="rounded-md bg-slate-50 border px-3 py-2">
+                  <div className="text-xs text-muted-foreground">Payable now</div>
+                  <div className="text-base font-semibold">£{computedPayable.toFixed(2)}</div>
+                </div>
+                <div className="rounded-md bg-slate-50 border px-3 py-2">
+                  <div className="text-xs text-muted-foreground">Due in</div>
+                  <div className="text-base font-semibold">
+                    {computedDueDays !== null ? `${computedDueDays} days` : "—"}
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Auto-paid amount uses positive card transactions between statement and due dates when available.
+              </p>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="accountNumber">Account Number</Label>
+              <Input
+                id="accountNumber"
+                value={accountData.accountNumber}
+                onChange={(e) => setAccountData((prev) => ({ ...prev, accountNumber: e.target.value }))}
+                placeholder="Full account number"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sortCode">Sort Code</Label>
+              <Input
+                id="sortCode"
+                value={accountData.sortCode}
+                onChange={(e) =>
+                  setAccountData((prev) => ({
+                    ...prev,
+                    sortCode: e.target.value.replace(/[^0-9]/g, ""),
+                  }))
+                }
+                placeholder="e.g. 202728"
+              />
+            </div>
+          </div>
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="balance">Current Balance</Label>
@@ -303,12 +432,12 @@ export function ViewAccountDialog({
                 </Button>
               </div>
             </div>
-            {secureError && (
-              <Alert variant="destructive">
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription>{secureError}</AlertDescription>
-              </Alert>
-            )}
+        {secureError && (
+          <Alert variant="destructive">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{secureError}</AlertDescription>
+          </Alert>
+        )}
             {secureUnlocked && (
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -374,7 +503,44 @@ export function ViewAccountDialog({
             </p>
           </div>
         </div>
-        <DialogFooter>
+        <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+          <DialogContent className="sm:max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle>Share account details</DialogTitle>
+              <DialogDescription>Copy the details below to share.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 text-sm whitespace-pre-line bg-slate-50 border rounded-md p-3">
+              {[
+                `Name: ${accountData.name || "—"}`,
+                `Bank: ${accountData.bankName || bankLabel || "—"}`,
+                `Sort Code: ${accountData.sortCode || "—"}`,
+                `Account Number: ${accountData.accountNumber || "—"}`,
+                `Currency: ${accountData.currency || "—"}`,
+              ].join("\n")}
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  const text = [
+                    `Name: ${accountData.name || "—"}`,
+                    `Bank: ${accountData.bankName || bankLabel || "—"}`,
+                    `Sort Code: ${accountData.sortCode || "—"}`,
+                    `Account Number: ${accountData.accountNumber || "—"}`,
+                    `Currency: ${accountData.currency || "—"}`,
+                  ].join("\n");
+                  await navigator.clipboard.writeText(text);
+                }}
+              >
+                Copy details
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <DialogFooter className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+          <Button variant="outline" onClick={() => setShareOpen(true)}>
+            Share details
+          </Button>
           <Button onClick={handleSave} disabled={saving}>
             {saving ? "Saving..." : "Save Changes"}
           </Button>

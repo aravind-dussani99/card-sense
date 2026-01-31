@@ -15,6 +15,15 @@ type BankAccountDisplay = {
     currency?: string | null;
     providerAccountId?: string | null;
     mask?: string | null;
+    accountNumber?: string | null;
+    sortCode?: string | null;
+    statementBalance?: number | null;
+    statementDate?: string | null;
+    statementDueDate?: string | null;
+    statementPaidAmount?: number | null;
+    statementPaidComputed?: number | null;
+    statementPayable?: number | null;
+    statementDueInDays?: number | null;
     tags?: string | null;
     connection?: { institutionId?: string | null; provider?: string | null } | null;
     balance?: number | null;
@@ -48,6 +57,13 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
         return "Bank";
     };
 
+    const deriveUkAccountDetails = (value: string) => {
+        const cleaned = value.replace(/\s+/g, "");
+        const match = cleaned.match(/^GB\d{2}[A-Z]{4}(\d{6})(\d{8})$/i);
+        if (!match) return { sortCode: "", accountNumber: "" };
+        return { sortCode: match[1], accountNumber: match[2] };
+    };
+
     return (
         <div className="space-y-3">
             {feedback && (
@@ -62,7 +78,36 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                     const balanceText = balanceValue === null ? "—" : balanceValue.toFixed(2);
                     const label = acct.name || acct.type || "Account";
                     const bankLabel = getBankLabel(acct);
-                    const accountRef = acct.mask || acct.providerAccountId || "••••";
+                    const derived = !acct.accountNumber && !acct.sortCode && acct.mask ? deriveUkAccountDetails(acct.mask) : null;
+                    const accountNumber = acct.accountNumber || derived?.accountNumber || "";
+                    const sortCode = acct.sortCode || derived?.sortCode || "";
+                    const formattedSortCode =
+                        sortCode && sortCode.length === 6
+                            ? `${sortCode.slice(0, 2)}-${sortCode.slice(2, 4)}-${sortCode.slice(4)}`
+                            : sortCode;
+                    const typeValue = (acct.type || "").toLowerCase();
+                    const isCard = typeValue.includes("card");
+                    const isOverdraft = typeValue.includes("overdraft");
+                    const cardMask = acct.mask || accountNumber.slice(-4) || "••••";
+                    const accountRef = isCard
+                        ? `Card •••• ${cardMask}`
+                        : accountNumber
+                            ? `${formattedSortCode ? `Sort ${formattedSortCode} · ` : ""}Acc ${accountNumber}`
+                            : acct.mask || acct.providerAccountId || "••••";
+                    const typeLabel = isOverdraft ? "Overdraft" : isCard ? "Card" : "Account";
+                    const statementBalance = typeof acct.statementBalance === "number" ? acct.statementBalance : null;
+                    const statementPaid =
+                        typeof acct.statementPaidComputed === "number"
+                            ? acct.statementPaidComputed
+                            : typeof acct.statementPaidAmount === "number"
+                                ? acct.statementPaidAmount
+                                : null;
+                    const statementPayable =
+                        typeof acct.statementPayable === "number"
+                            ? acct.statementPayable
+                            : statementBalance !== null
+                                ? Math.max(0, statementBalance - (statementPaid ?? 0))
+                                : null;
                     return (
                         <div key={acct.id} className="p-3 rounded-lg border shadow-sm flex flex-col gap-2 w-full">
                             <div className="text-xs text-muted-foreground">
@@ -74,6 +119,9 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                             <div className="text-base font-semibold">{label}</div>
                             <div className="text-xs text-muted-foreground break-all">
                                 {acct.currency || "—"} · {accountRef}
+                                <span className="ml-2 text-[11px] uppercase tracking-wide text-slate-400">
+                                    {typeLabel}
+                                </span>
                             </div>
                             <div className="text-sm font-semibold">
                                 Balance: {balanceText}
@@ -81,6 +129,21 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                             {acct.limit !== null && acct.limit !== undefined && (
                                 <div className="text-xs text-muted-foreground">
                                     Limit: {acct.limit.toFixed(2)}
+                                </div>
+                            )}
+                            {isCard && (
+                                <div className="text-xs text-muted-foreground space-y-1">
+                                    <div className="flex flex-wrap gap-2">
+                                        <span>Statement: {statementBalance === null ? "—" : statementBalance.toFixed(2)}</span>
+                                        <span>Paid: {statementPaid === null ? "—" : statementPaid.toFixed(2)}</span>
+                                        <span>Payable: {statementPayable === null ? "—" : statementPayable.toFixed(2)}</span>
+                                    </div>
+                                    <div>
+                                        Due in:{" "}
+                                        {acct.statementDueInDays !== null && acct.statementDueInDays !== undefined
+                                            ? `${acct.statementDueInDays} days`
+                                            : "—"}
+                                    </div>
                                 </div>
                             )}
                             <div className="mt-1 flex gap-2">

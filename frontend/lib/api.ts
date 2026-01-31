@@ -17,6 +17,21 @@ export async function apiFetch<T>(path: string, options: FetchOptions = {}) {
   if (!headers.has("Content-Type") && options.body) {
     headers.set("Content-Type", "application/json");
   }
+  if (!headers.has("Authorization")) {
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("cardsense_token") || "";
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+    } else {
+      try {
+        const { cookies } = await import("next/headers");
+        const cookieStore = await cookies();
+        const token = cookieStore.get("cardsense_token")?.value;
+        if (token) headers.set("Authorization", `Bearer ${token}`);
+      } catch {
+        // ignore when headers API isn't available
+      }
+    }
+  }
 
   const response = await fetch(url, {
     ...options,

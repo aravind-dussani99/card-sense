@@ -9,8 +9,9 @@ import { CardDisplay } from "@/components/card-display";
 import { EditCardDialog } from "@/components/edit-card-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CreditCard as CardIcon } from "lucide-react";
+import { CreditCard as CardIcon, Eye, EyeOff } from "lucide-react";
 import { BankAccount, Card as CardModel } from "@/lib/types";
+import { useBalanceVisibility } from "@/lib/balance-visibility";
 
 type VisibleSection = "all" | "bank" | "overdraft" | "credit";
 
@@ -49,10 +50,17 @@ const PlaceholderTile = ({ label }: { label: string }) => (
 
 export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentProps) {
     const overdraftAccounts = useMemo(() => bankAccounts.filter(isOverdraft), [bankAccounts]);
-    const standardAccounts = useMemo(() => bankAccounts.filter((acct) => !isOverdraft(acct)), [bankAccounts]);
+    const cardAccounts = useMemo(
+        () => bankAccounts.filter((acct) => (acct.type || "").toLowerCase().includes("card")),
+        [bankAccounts]
+    );
+    const standardAccounts = useMemo(
+        () => bankAccounts.filter((acct) => !isOverdraft(acct) && !(acct.type || "").toLowerCase().includes("card")),
+        [bankAccounts]
+    );
     const hasBankAccounts = standardAccounts.length > 0;
     const hasOverdraftAccounts = overdraftAccounts.length > 0;
-    const hasCreditCards = cards.length > 0;
+    const hasCreditCards = cards.length > 0 || cardAccounts.length > 0;
     const initialSection = getSectionFromHash();
 
     const [showBank, setShowBank] = useState(() => {
@@ -96,9 +104,29 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
         0
     );
     const overdraftUsed = Math.max(0, overdraftLimit - overdraftAvailable);
-    const creditLimit = cards.reduce((sum, card) => sum + toNumber(card.limit), 0);
-    const creditUsed = cards.reduce((sum, card) => sum + toNumber(card.balance), 0);
+    const cardAccountLimit = cardAccounts.reduce((sum, acct) => sum + toNumber(acct.limit), 0);
+    const cardAccountAvailable = cardAccounts.reduce((sum, acct) => {
+        if (typeof acct.availableBalance === "number") return sum + acct.availableBalance;
+        if (typeof acct.limit === "number" && typeof acct.balance === "number") {
+            return sum + Math.max(0, acct.limit - acct.balance);
+        }
+        return sum;
+    }, 0);
+    const cardAccountUsed = cardAccounts.reduce((sum, acct) => {
+        if (typeof acct.limit === "number" && typeof acct.availableBalance === "number") {
+            return sum + Math.max(0, acct.limit - acct.availableBalance);
+        }
+        if (typeof acct.balance === "number") return sum + Math.max(0, acct.balance);
+        return sum;
+    }, 0);
+    const manualCardLimit = cards.reduce((sum, card) => sum + toNumber(card.limit), 0);
+    const manualCardUsed = cards.reduce((sum, card) => sum + toNumber(card.balance), 0);
+    const creditLimit = manualCardLimit + cardAccountLimit;
+    const creditUsed = manualCardUsed + cardAccountUsed;
     const creditAvailable = Math.max(0, creditLimit - creditUsed);
+    const visibility = useBalanceVisibility();
+    const hidden = !visibility.visible;
+    const formatMoney = (value: number) => (hidden ? "•••" : `£${value.toFixed(2)}`);
 
     const showBankSection = showBank && hasBankAccounts;
     const showOverdraftSection = showOverdraft && hasOverdraftAccounts;
@@ -115,6 +143,14 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => visibility.toggle()}
+                        aria-label={hidden ? "Show balances" : "Hide balances"}
+                    >
+                        {hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                    </Button>
                     <AddCardDialog />
                     <AddAccountDialog />
                 </div>
@@ -136,7 +172,7 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                             <CardDescription className="text-xs">Available</CardDescription>
                         </CardHeader>
                         <CardContent className="pt-0 pb-3">
-                            <div className="text-xl font-semibold">£{bankAvailable.toFixed(2)}</div>
+                            <div className="text-xl font-semibold">{formatMoney(bankAvailable)}</div>
                             <p className="text-xs text-muted-foreground">Across all bank accounts</p>
                         </CardContent>
                     </Card>
@@ -156,9 +192,9 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                             <CardDescription className="text-xs">Used / Available / Limit</CardDescription>
                         </CardHeader>
                         <CardContent className="pt-0 pb-3">
-                            <div className="text-xl font-semibold">£{overdraftUsed.toFixed(2)}</div>
+                            <div className="text-xl font-semibold">{formatMoney(overdraftUsed)}</div>
                             <p className="text-xs text-muted-foreground">
-                                £{overdraftAvailable.toFixed(2)} avail · £{overdraftLimit.toFixed(2)} limit
+                                {formatMoney(overdraftAvailable)} avail · {formatMoney(overdraftLimit)} limit
                             </p>
                         </CardContent>
                     </Card>
@@ -178,9 +214,9 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                             <CardDescription className="text-xs">Used / Available / Limit</CardDescription>
                         </CardHeader>
                         <CardContent className="pt-0 pb-3">
-                            <div className="text-xl font-semibold">£{creditUsed.toFixed(2)}</div>
+                            <div className="text-xl font-semibold">{formatMoney(creditUsed)}</div>
                             <p className="text-xs text-muted-foreground">
-                                £{creditAvailable.toFixed(2)} avail · £{creditLimit.toFixed(2)} limit
+                                {formatMoney(creditAvailable)} avail · {formatMoney(creditLimit)} limit
                             </p>
                         </CardContent>
                     </Card>
@@ -273,6 +309,11 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                         </div>
                     </CardHeader>
                     <CardContent>
+                        {cardAccounts.length > 0 && (
+                            <div className="mb-4">
+                                <BankAccountsList bankAccounts={cardAccounts} />
+                            </div>
+                        )}
                         <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
                             {cards.map((card) => {
                                 const displayCard = {
@@ -327,8 +368,8 @@ export function AccountsHubContent({ cards, bankAccounts }: AccountsHubContentPr
                                     </div>
                                 );
                             })}
-                            {cards.length < 4 &&
-                                Array.from({ length: 4 - cards.length }).map((_, idx) => (
+                            {cards.length + cardAccounts.length < 4 &&
+                                Array.from({ length: 4 - (cards.length + cardAccounts.length) }).map((_, idx) => (
                                     <PlaceholderTile key={`card-placeholder-${idx}`} label="Credit card" />
                                 ))}
                         </div>

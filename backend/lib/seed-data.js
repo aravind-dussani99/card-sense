@@ -2,7 +2,7 @@ import { prisma } from "./prisma.js";
 
 export async function seedDefaultData() {
   try {
-    const existingCategories = await prisma.category.findMany();
+    const existingCategories = await prisma.category.findMany({ where: { userId: null } });
     const existingCardTypes = await prisma.cardType.findMany();
     const existingBanks = await prisma.bank.findMany();
 
@@ -17,9 +17,10 @@ export async function seedDefaultData() {
 
     for (const category of defaultCategories) {
       await prisma.category.upsert({
-        where: { name: category.name },
+        where: { userId_name: { userId: null, name: category.name } },
         update: { color: category.color, icon: category.icon },
         create: {
+          userId: null,
           name: category.name,
           color: category.color,
           icon: category.icon,
@@ -65,9 +66,9 @@ export async function seedDefaultData() {
 
     for (const category of mustHaveCategories) {
       const savedCategory = await prisma.category.upsert({
-        where: { name: category.name },
+        where: { userId_name: { userId: null, name: category.name } },
         update: {},
-        create: { name: category.name },
+        create: { userId: null, name: category.name },
       });
 
       for (const subName of category.subCategories) {

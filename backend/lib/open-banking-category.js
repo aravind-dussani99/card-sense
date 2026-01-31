@@ -95,31 +95,7 @@ export function getProviderCategory(tx) {
 }
 
 export function mapOpenBankingCategory(tx) {
-  const candidate = [tx.transaction_category, tx.category, tx.transaction_type, tx.type]
-    .flat()
-    .filter(Boolean)
-    .map((value) => normalize(String(value)));
-  const mccCode = tx.merchant_category_code ? String(tx.merchant_category_code) : "";
-  if (mccCode && MCC_CATEGORY_MAP[mccCode]) {
-    return MCC_CATEGORY_MAP[mccCode];
-  }
-
-  const haystack = normalize(
-    [tx.merchant_name, tx.description, tx.counterparty?.name, tx.reference].filter(Boolean).join(" ")
-  );
-  for (const { category, terms } of KEYWORD_MAP) {
-    if (terms.some((term) => haystack.includes(term))) {
-      return category;
-    }
-  }
-
-  for (const value of candidate) {
-    if (PROVIDER_CATEGORY_MAP[value]) return PROVIDER_CATEGORY_MAP[value];
-    const hit = Object.entries(PROVIDER_CATEGORY_MAP).find(([key]) => value.includes(key));
-    if (hit) return hit[1];
-  }
-
-  return STANDARD_CATEGORIES.includes(tx.category) ? tx.category : "Other";
+  return resolveOpenBankingCategory(tx).category;
 }
 
 export function mapOpenBankingCategoryFromRecord(record) {
@@ -134,4 +110,37 @@ export function mapOpenBankingCategoryFromRecord(record) {
   if (!parsed.description && record.descriptionVia) parsed.description = record.descriptionVia;
   if (!parsed.merchant_name && record.merchant) parsed.merchant_name = record.merchant;
   return mapOpenBankingCategory(parsed);
+}
+
+export function resolveOpenBankingCategory(tx) {
+  const candidate = [tx.transaction_category, tx.category, tx.transaction_type, tx.type]
+    .flat()
+    .filter(Boolean)
+    .map((value) => normalize(String(value)));
+  const mccCode = tx.merchant_category_code ? String(tx.merchant_category_code) : "";
+  if (mccCode && MCC_CATEGORY_MAP[mccCode]) {
+    return { category: MCC_CATEGORY_MAP[mccCode], source: "mcc" };
+  }
+
+  const haystack = normalize(
+    [tx.merchant_name, tx.description, tx.counterparty?.name, tx.reference].filter(Boolean).join(" ")
+  );
+  for (const { category, terms } of KEYWORD_MAP) {
+    if (terms.some((term) => haystack.includes(term))) {
+      return { category, source: "keyword" };
+    }
+  }
+
+  for (const value of candidate) {
+    if (PROVIDER_CATEGORY_MAP[value]) {
+      return { category: PROVIDER_CATEGORY_MAP[value], source: "provider" };
+    }
+    const hit = Object.entries(PROVIDER_CATEGORY_MAP).find(([key]) => value.includes(key));
+    if (hit) {
+      return { category: hit[1], source: "provider" };
+    }
+  }
+
+  const fallback = STANDARD_CATEGORIES.includes(tx.category) ? tx.category : "Other";
+  return { category: fallback, source: "fallback" };
 }

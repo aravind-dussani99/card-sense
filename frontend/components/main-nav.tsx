@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { CreditCard, Home, PieChart, DollarSign, Receipt, Settings, Gift } from "lucide-react"
+import { CreditCard, Home, PieChart, DollarSign, Receipt, Settings, Gift, User } from "lucide-react"
 
 export function MainNav({
     className,
@@ -72,6 +72,15 @@ export function MainNav({
                 <div className="flex items-center gap-2">
                     <Settings className="h-4 w-4" />
                     Settings
+                </div>
+            </Link>
+            <Link
+                href="/profile"
+                className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+            >
+                <div className="flex items-center gap-2">
+                    <User className="h-4 w-4" />
+                    Profile
                 </div>
             </Link>
         </nav>

@@ -15,11 +15,27 @@ import {
   buildMerchantKey,
   getProviderCategory,
   mapOpenBankingCategory,
+  resolveOpenBankingCategory,
 } from "./lib/open-banking-category.js";
+import {
+  createAccessToken,
+  createRandomToken,
+  hashPassword,
+  hashToken,
+  verifyAccessToken,
+  verifyPassword,
+} from "./lib/auth.js";
+import { sendEmail } from "./lib/email.js";
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 8081;
+const APP_URL = process.env.APP_URL || "http://localhost:3000";
+const OWNER_EMAILS = (process.env.OWNER_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+const FEEDBACK_EMAIL = process.env.FEEDBACK_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER || "";
 
 app.use(express.json({ limit: "5mb" }));
 
@@ -49,7 +65,15 @@ const normalizeBalancePayload = (payload) => {
   return result;
 };
 
-const resolveTransactionCategory = async (tx) => {
+const deriveUkAccountDetails = (value) => {
+  if (!value) return { accountNumber: null, sortCode: null };
+  const raw = String(value).replace(/\s+/g, "");
+  const match = raw.match(/^GB\d{2}[A-Z]{4}(\d{6})(\d{8})$/i);
+  if (!match) return { accountNumber: null, sortCode: null };
+  return { sortCode: match[1], accountNumber: match[2] };
+};
+
+const resolveTransactionCategory = async (tx, userId) => {
   const merchantKey = buildMerchantKey(tx);
   const providerCategory = getProviderCategory(tx);
   const mcc = tx.merchant_category_code ? String(tx.merchant_category_code) : null;
@@ -57,28 +81,34 @@ const resolveTransactionCategory = async (tx) => {
   let rule = null;
   if (merchantKey) {
     rule = await prisma.merchantCategoryRule.findUnique({
-      where: { merchantKey },
+      where: { userId_merchantKey: { userId, merchantKey } },
     });
   }
 
-  const mapped = rule?.category || mapOpenBankingCategory(tx);
+  if (rule?.category) {
+    return { category: rule.category, source: rule.source || "manual" };
+  }
 
-  if (merchantKey && (providerCategory || mcc)) {
+  const resolved = resolveOpenBankingCategory(tx);
+  const mapped = resolved.category;
+
+  if (merchantKey && (providerCategory || mcc || resolved.source === "keyword")) {
     await prisma.merchantCategoryRule.upsert({
-      where: { merchantKey },
+      where: { userId_merchantKey: { userId, merchantKey } },
       update: {
         category: mapped,
-        source: providerCategory ? "provider" : "mcc",
+        source: resolved.source,
       },
       create: {
+        userId,
         merchantKey,
         category: mapped,
-        source: providerCategory ? "provider" : "mcc",
+        source: resolved.source,
       },
     });
   }
 
-  return mapped;
+  return { category: mapped, source: resolved.source };
 };
 app.use((req, res, next) => {
   const allowedOriginRaw = process.env.CORS_ORIGIN || "*";
@@ -104,9 +134,417 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-app.get("/api/cards", async (_req, res) => {
+const sanitizeUser = (user) => ({
+  id: user.id,
+  email: user.email,
+  name: user.name || null,
+  role: user.role,
+  emailVerifiedAt: user.emailVerifiedAt,
+  createdAt: user.createdAt,
+});
+
+const getBearerToken = (req) => {
+  const header = req.headers.authorization || "";
+  if (header.startsWith("Bearer ")) {
+    return header.slice(7);
+  }
+  return null;
+};
+
+const requireAuth = async (req, res, next) => {
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
   try {
+    const payload = verifyAccessToken(token);
+    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    req.user = user;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: "Unauthorized" });
+  }
+};
+
+const getOptionalUser = async (req) => {
+  const token = getBearerToken(req);
+  if (!token) return null;
+  try {
+    const payload = verifyAccessToken(token);
+    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    return user || null;
+  } catch {
+    return null;
+  }
+};
+
+const isAdminUser = (user) => {
+  if (!user) return false;
+  if (user.role === "ADMIN") return true;
+  if (!user.email) return false;
+  return OWNER_EMAILS.includes(user.email.toLowerCase());
+};
+
+const issueEmailVerification = async (user) => {
+  const token = createRandomToken();
+  const tokenHash = hashToken(token);
+  await prisma.emailVerificationToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    },
+  });
+  const verifyLink = `${APP_URL}/verify-email?token=${token}`;
+  await sendEmail({
+    to: user.email,
+    subject: "Verify your CardSense account",
+    text: `Verify your email: ${verifyLink}`,
+    html: `<p>Verify your email: <a href="${verifyLink}">${verifyLink}</a></p>`,
+  });
+  return token;
+};
+
+const issuePasswordReset = async (user) => {
+  const token = createRandomToken();
+  const tokenHash = hashToken(token);
+  await prisma.passwordResetToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    },
+  });
+  const resetLink = `${APP_URL}/reset-password?token=${token}`;
+  await sendEmail({
+    to: user.email,
+    subject: "Reset your CardSense password",
+    text: `Reset your password: ${resetLink}`,
+    html: `<p>Reset your password: <a href="${resetLink}">${resetLink}</a></p>`,
+  });
+  return token;
+};
+
+app.post("/api/auth/signup", async (req, res) => {
+  try {
+    const { email, password, name } = req.body || {};
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!normalizedEmail || typeof password !== "string" || password.length < 8) {
+      res.status(400).json({ error: "Invalid email or password" });
+      return;
+    }
+    const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (existing) {
+      res.status(409).json({ error: "Email already in use" });
+      return;
+    }
+    const passwordHash = await hashPassword(password);
+    const user = await prisma.user.create({
+      data: {
+        email: normalizedEmail,
+        passwordHash,
+        name: typeof name === "string" && name.trim() ? name.trim() : null,
+      },
+    });
+    const token = await issueEmailVerification(user);
+    res.status(201).json({
+      success: true,
+      user: sanitizeUser(user),
+      verificationSent: true,
+      verificationToken: process.env.NODE_ENV === "production" ? undefined : token,
+    });
+  } catch (error) {
+    console.error("Signup error:", error);
+    res.status(500).json({ error: "Failed to sign up" });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!normalizedEmail || typeof password !== "string") {
+      res.status(400).json({ error: "Invalid email or password" });
+      return;
+    }
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user) {
+      res.status(401).json({ error: "Invalid credentials" });
+      return;
+    }
+    const ok = await verifyPassword(password, user.passwordHash);
+    if (!ok) {
+      res.status(401).json({ error: "Invalid credentials" });
+      return;
+    }
+    if (!user.emailVerifiedAt) {
+      res.status(403).json({ error: "Email not verified", verificationRequired: true });
+      return;
+    }
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+    const token = createAccessToken(updated);
+    res.json({ success: true, token, user: sanitizeUser(updated) });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Failed to login" });
+  }
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  res.json({ success: true });
+});
+
+app.get("/api/auth/verify-email", async (req, res) => {
+  try {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    if (!token) {
+      res.status(400).json({ error: "Missing token" });
+      return;
+    }
+    const tokenHash = hashToken(token);
+    const record = await prisma.emailVerificationToken.findUnique({
+      where: { tokenHash },
+      include: { user: true },
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      res.status(400).json({ error: "Invalid or expired token" });
+      return;
+    }
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: record.userId },
+        data: { emailVerifiedAt: now },
+      }),
+      prisma.emailVerificationToken.update({
+        where: { id: record.id },
+        data: { usedAt: now },
+      }),
+    ]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Verify email error:", error);
+    res.status(500).json({ error: "Failed to verify email" });
+  }
+});
+
+app.post("/api/auth/resend-verification", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!normalizedEmail) {
+      res.status(400).json({ error: "Invalid email" });
+      return;
+    }
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user || user.emailVerifiedAt) {
+      res.json({ success: true });
+      return;
+    }
+    const token = await issueEmailVerification(user);
+    res.json({
+      success: true,
+      verificationSent: true,
+      verificationToken: process.env.NODE_ENV === "production" ? undefined : token,
+    });
+  } catch (error) {
+    console.error("Resend verification error:", error);
+    res.status(500).json({ error: "Failed to resend verification" });
+  }
+});
+
+app.post("/api/auth/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!normalizedEmail) {
+      res.status(400).json({ error: "Invalid email" });
+      return;
+    }
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (user) {
+      const token = await issuePasswordReset(user);
+      res.json({
+        success: true,
+        resetToken: process.env.NODE_ENV === "production" ? undefined : token,
+      });
+      return;
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({ error: "Failed to send reset email" });
+  }
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+    if (typeof token !== "string" || typeof password !== "string" || password.length < 8) {
+      res.status(400).json({ error: "Invalid token or password" });
+      return;
+    }
+    const tokenHash = hashToken(token);
+    const record = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: { user: true },
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      res.status(400).json({ error: "Invalid or expired token" });
+      return;
+    }
+    const passwordHash = await hashPassword(password);
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: record.userId },
+        data: { passwordHash },
+      }),
+      prisma.passwordResetToken.update({
+        where: { id: record.id },
+        data: { usedAt: now },
+      }),
+    ]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({ error: "Failed to reset password" });
+  }
+});
+
+app.get("/api/auth/me", requireAuth, async (req, res) => {
+  res.json({ user: sanitizeUser(req.user) });
+});
+
+app.put("/api/auth/profile", requireAuth, async (req, res) => {
+  try {
+    const { name } = req.body || {};
+    const updated = await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        name: typeof name === "string" && name.trim() ? name.trim() : null,
+      },
+    });
+    res.json({ success: true, user: sanitizeUser(updated) });
+  } catch (error) {
+    console.error("Profile update error:", error);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
+app.use("/api", (req, res, next) => {
+  if (req.path.startsWith("/auth")) {
+    next();
+    return;
+  }
+  if (req.path.startsWith("/bank/callback")) {
+    next();
+    return;
+  }
+  if (req.path.startsWith("/feedback")) {
+    next();
+    return;
+  }
+  requireAuth(req, res, next);
+});
+
+app.get("/api/admin/metrics", async (req, res) => {
+  try {
+    if (!isAdminUser(req.user)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    const now = new Date();
+    const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const [
+      totalUsers,
+      verifiedUsers,
+      activeUsers,
+      totalCards,
+      totalBankAccounts,
+      totalBankTransactions,
+      totalTransactions,
+      totalConnections,
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.user.count({ where: { emailVerifiedAt: { not: null } } }),
+      prisma.user.count({ where: { lastLoginAt: { gte: since } } }),
+      prisma.card.count(),
+      prisma.bankAccount.count(),
+      prisma.bankTransaction.count(),
+      prisma.transaction.count(),
+      prisma.bankConnection.count(),
+    ]);
+
+    res.json({
+      success: true,
+      metrics: {
+        totalUsers,
+        verifiedUsers,
+        activeUsersLast30Days: activeUsers,
+        totalCards,
+        totalBankAccounts,
+        totalBankTransactions,
+        totalManualTransactions: totalTransactions,
+        totalBankConnections: totalConnections,
+      },
+    });
+  } catch (error) {
+    console.error("Admin metrics error:", error);
+    res.status(500).json({ error: "Failed to load metrics" });
+  }
+});
+
+app.post("/api/feedback", async (req, res) => {
+  try {
+    const user = await getOptionalUser(req);
+    const { name, email, message } = req.body || {};
+    const resolvedName =
+      typeof name === "string" && name.trim()
+        ? name.trim()
+        : user?.name || "Anonymous";
+    const resolvedEmail =
+      typeof email === "string" && email.trim()
+        ? email.trim()
+        : user?.email || "anonymous@local";
+    const body = typeof message === "string" ? message.trim() : "";
+
+    if (!body) {
+      res.status(400).json({ error: "Message is required" });
+      return;
+    }
+    if (!FEEDBACK_EMAIL) {
+      res.status(500).json({ error: "Feedback email not configured" });
+      return;
+    }
+
+    await sendEmail({
+      to: FEEDBACK_EMAIL,
+      subject: `CardSense Feedback from ${resolvedName}`,
+      text: `Name: ${resolvedName}\nEmail: ${resolvedEmail}\n\n${body}`,
+      html: `<p><strong>Name:</strong> ${resolvedName}</p><p><strong>Email:</strong> ${resolvedEmail}</p><p>${body}</p>`,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Feedback error:", error);
+    res.status(500).json({ error: "Failed to send feedback" });
+  }
+});
+
+app.get("/api/cards", async (req, res) => {
+  try {
+    const userId = req.user.id;
     const cards = await prisma.card.findMany({
+      where: { userId },
       include: { cardType: true, bankRef: true },
       orderBy: { createdAt: "desc" },
     });
@@ -119,6 +557,7 @@ app.get("/api/cards", async (_req, res) => {
 
 app.post("/api/cards", async (req, res) => {
   try {
+    const userId = req.user.id;
     const payload = req.body || {};
     if (!payload.name || !payload.bank || !payload.last4) {
       res.status(400).json({ error: "name, bank, and last4 are required" });
@@ -126,6 +565,7 @@ app.post("/api/cards", async (req, res) => {
     }
     const card = await prisma.card.create({
       data: {
+        userId,
         name: payload.name,
         nameOnCard: payload.nameOnCard || null,
         bank: payload.bank,
@@ -154,11 +594,16 @@ app.post("/api/cards", async (req, res) => {
 
 app.put("/api/cards/:id", async (req, res) => {
   try {
-    const card = await prisma.card.update({
-      where: { id: req.params.id },
+    const userId = req.user.id;
+    const updated = await prisma.card.updateMany({
+      where: { id: req.params.id, userId },
       data: req.body || {},
     });
-    res.json(card);
+    if (!updated.count) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
+    res.json({ success: true });
   } catch (error) {
     console.error("Failed to update card:", error);
     res.status(500).json({ error: "Failed to update card" });
@@ -167,7 +612,12 @@ app.put("/api/cards/:id", async (req, res) => {
 
 app.delete("/api/cards/:id", async (req, res) => {
   try {
-    await prisma.card.delete({ where: { id: req.params.id } });
+    const userId = req.user.id;
+    const deleted = await prisma.card.deleteMany({ where: { id: req.params.id, userId } });
+    if (!deleted.count) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
     res.status(204).send();
   } catch (error) {
     console.error("Failed to delete card:", error);
@@ -273,9 +723,13 @@ app.delete("/api/card-types/:id", async (req, res) => {
   }
 });
 
-app.get("/api/categories", async (_req, res) => {
+app.get("/api/categories", async (req, res) => {
   try {
+    const userId = req.user.id;
     const categories = await prisma.category.findMany({
+      where: {
+        OR: [{ userId }, { userId: null }],
+      },
       orderBy: { name: "asc" },
       include: {
         subCategories: { orderBy: { name: "asc" } },
@@ -290,13 +744,14 @@ app.get("/api/categories", async (_req, res) => {
 
 app.post("/api/categories", async (req, res) => {
   try {
+    const userId = req.user.id;
     const { name, icon, color } = req.body || {};
     if (!name) {
       res.status(400).json({ error: "name is required" });
       return;
     }
     const category = await prisma.category.create({
-      data: { name, icon: icon || null, color: color || null },
+      data: { userId, name, icon: icon || null, color: color || null },
     });
     res.status(201).json({ success: true, data: category });
   } catch (error) {
@@ -307,12 +762,17 @@ app.post("/api/categories", async (req, res) => {
 
 app.put("/api/categories/:id", async (req, res) => {
   try {
+    const userId = req.user.id;
     const { name, icon, color } = req.body || {};
-    const category = await prisma.category.update({
-      where: { id: req.params.id },
+    const updated = await prisma.category.updateMany({
+      where: { id: req.params.id, userId },
       data: { name, icon: icon || null, color: color || null },
     });
-    res.json({ success: true, data: category });
+    if (!updated.count) {
+      res.status(404).json({ error: "Category not found" });
+      return;
+    }
+    res.json({ success: true });
   } catch (error) {
     console.error("Failed to update category:", error);
     res.status(500).json({ error: "Failed to update category" });
@@ -321,7 +781,12 @@ app.put("/api/categories/:id", async (req, res) => {
 
 app.delete("/api/categories/:id", async (req, res) => {
   try {
-    await prisma.category.delete({ where: { id: req.params.id } });
+    const userId = req.user.id;
+    const deleted = await prisma.category.deleteMany({ where: { id: req.params.id, userId } });
+    if (!deleted.count) {
+      res.status(404).json({ error: "Category not found" });
+      return;
+    }
     res.status(204).send();
   } catch (error) {
     console.error("Failed to delete category:", error);
@@ -331,9 +796,17 @@ app.delete("/api/categories/:id", async (req, res) => {
 
 app.post("/api/categories/:id/subcategories", async (req, res) => {
   try {
+    const userId = req.user.id;
     const { name } = req.body || {};
     if (!name) {
       res.status(400).json({ error: "name is required" });
+      return;
+    }
+    const category = await prisma.category.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!category) {
+      res.status(404).json({ error: "Category not found" });
       return;
     }
     const subCategory = await prisma.subCategory.create({
@@ -348,12 +821,17 @@ app.post("/api/categories/:id/subcategories", async (req, res) => {
 
 app.put("/api/subcategories/:id", async (req, res) => {
   try {
+    const userId = req.user.id;
     const { name } = req.body || {};
-    const subCategory = await prisma.subCategory.update({
-      where: { id: req.params.id },
+    const updated = await prisma.subCategory.updateMany({
+      where: { id: req.params.id, category: { userId } },
       data: { name },
     });
-    res.json({ success: true, data: subCategory });
+    if (!updated.count) {
+      res.status(404).json({ error: "Sub-category not found" });
+      return;
+    }
+    res.json({ success: true });
   } catch (error) {
     console.error("Failed to update sub-category:", error);
     res.status(500).json({ error: "Failed to update sub-category" });
@@ -362,7 +840,14 @@ app.put("/api/subcategories/:id", async (req, res) => {
 
 app.delete("/api/subcategories/:id", async (req, res) => {
   try {
-    await prisma.subCategory.delete({ where: { id: req.params.id } });
+    const userId = req.user.id;
+    const deleted = await prisma.subCategory.deleteMany({
+      where: { id: req.params.id, category: { userId } },
+    });
+    if (!deleted.count) {
+      res.status(404).json({ error: "Sub-category not found" });
+      return;
+    }
     res.status(204).send();
   } catch (error) {
     console.error("Failed to delete sub-category:", error);
@@ -372,9 +857,9 @@ app.delete("/api/subcategories/:id", async (req, res) => {
 
 app.get("/api/bank/connections", async (req, res) => {
   try {
-    const userId = req.query.userId ? String(req.query.userId) : undefined;
+    const userId = req.user.id;
     const connections = await prisma.bankConnection.findMany({
-      where: userId ? { userId } : undefined,
+      where: { userId },
       orderBy: { createdAt: "desc" },
     });
     res.json(connections);
@@ -386,7 +871,12 @@ app.get("/api/bank/connections", async (req, res) => {
 
 app.delete("/api/bank/connections/:id", async (req, res) => {
   try {
-    await prisma.bankConnection.deleteMany({ where: { id: req.params.id } });
+    const userId = req.user.id;
+    const deleted = await prisma.bankConnection.deleteMany({ where: { id: req.params.id, userId } });
+    if (!deleted.count) {
+      res.status(404).json({ error: "Connection not found" });
+      return;
+    }
     res.status(204).send();
   } catch (error) {
     console.error("Failed to delete bank connection:", error);
@@ -396,10 +886,15 @@ app.delete("/api/bank/connections/:id", async (req, res) => {
 
 app.delete("/api/bank/accounts/:id", async (req, res) => {
   try {
-    await prisma.bankAccount.update({
-      where: { id: req.params.id },
+    const userId = req.user.id;
+    const updated = await prisma.bankAccount.updateMany({
+      where: { id: req.params.id, userId },
       data: { status: "deleted" },
     });
+    if (!updated.count) {
+      res.status(404).json({ error: "Account not found" });
+      return;
+    }
     res.status(204).send();
   } catch (error) {
     console.error("Failed to delete bank account:", error);
@@ -407,14 +902,72 @@ app.delete("/api/bank/accounts/:id", async (req, res) => {
   }
 });
 
-app.get("/api/bank/accounts", async (_req, res) => {
+app.get("/api/bank/accounts", async (req, res) => {
   try {
+    const userId = req.user.id;
     const accounts = await prisma.bankAccount.findMany({
-      where: { status: "active" },
+      where: { status: "active", userId },
       orderBy: { name: "asc" },
       include: { connection: true },
     });
-    res.json(accounts);
+    const cardAccounts = accounts.filter((acct) =>
+      (acct.type || "").toLowerCase().includes("card")
+    );
+    const minStatementDate = cardAccounts
+      .map((acct) => acct.statementDate)
+      .filter(Boolean)
+      .reduce((min, value) => (min && value && min < value ? min : value), null);
+
+    let transactions = [];
+    if (cardAccounts.length && minStatementDate) {
+      transactions = await prisma.bankTransaction.findMany({
+        where: {
+          userId,
+          accountId: { in: cardAccounts.map((acct) => acct.id) },
+          date: { gte: minStatementDate },
+        },
+      });
+    }
+    const byAccount = transactions.reduce((acc, tx) => {
+      const list = acc[tx.accountId] || [];
+      list.push(tx);
+      acc[tx.accountId] = list;
+      return acc;
+    }, {});
+
+    const now = new Date();
+    const enriched = accounts.map((acct) => {
+      if (!(acct.type || "").toLowerCase().includes("card") || !acct.statementBalance || !acct.statementDate) {
+        const derived = (!acct.accountNumber || !acct.sortCode) && acct.mask ? deriveUkAccountDetails(acct.mask) : null;
+        return {
+          ...acct,
+          accountNumber: acct.accountNumber || derived?.accountNumber || null,
+          sortCode: acct.sortCode || derived?.sortCode || null,
+        };
+      }
+      const accountTx = byAccount[acct.id] || [];
+      const dueDate = acct.statementDueDate || now;
+      const paidAuto = accountTx
+        .filter((tx) => tx.amount > 0 && tx.date >= acct.statementDate && tx.date <= dueDate)
+        .reduce((sum, tx) => sum + tx.amount, 0);
+      const paidManual = typeof acct.statementPaidAmount === "number" ? acct.statementPaidAmount : 0;
+      const paidTotal = paidAuto + paidManual;
+      const payable = Math.max(0, acct.statementBalance - paidTotal);
+      const dueInDays = acct.statementDueDate
+        ? Math.ceil((acct.statementDueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+      const derived = (!acct.accountNumber || !acct.sortCode) && acct.mask ? deriveUkAccountDetails(acct.mask) : null;
+      return {
+        ...acct,
+        accountNumber: acct.accountNumber || derived?.accountNumber || null,
+        sortCode: acct.sortCode || derived?.sortCode || null,
+        statementPaidComputed: paidTotal,
+        statementPayable: payable,
+        statementDueInDays: dueInDays,
+      };
+    });
+
+    res.json(enriched);
   } catch (error) {
     console.error("Failed to fetch bank accounts:", error);
     res.status(500).json({ error: "Failed to fetch bank accounts" });
@@ -423,12 +976,27 @@ app.get("/api/bank/accounts", async (_req, res) => {
 
 app.post("/api/bank/accounts", async (req, res) => {
   try {
-    const { name, type, bankName, mask, currency, userId, balance, availableBalance, limit } = req.body || {};
+    const {
+      name,
+      type,
+      bankName,
+      mask,
+      currency,
+      balance,
+      availableBalance,
+      limit,
+      accountNumber,
+      sortCode,
+      statementBalance,
+      statementDate,
+      statementDueDate,
+      statementPaidAmount,
+    } = req.body || {};
     if (!name) {
       res.status(400).json({ error: "name is required" });
       return;
     }
-    const ownerId = userId || "local-user";
+    const ownerId = req.user.id;
     let connection = await prisma.bankConnection.findFirst({
       where: { userId: ownerId, provider: "manual" },
     });
@@ -447,12 +1015,19 @@ app.post("/api/bank/accounts", async (req, res) => {
     }
     const account = await prisma.bankAccount.create({
       data: {
+        userId: ownerId,
         connectionId: connection.id,
         providerAccountId: `manual-${crypto.randomUUID()}`,
         type: type || "account",
         name,
         currency: currency || null,
         mask: mask || null,
+        accountNumber: typeof accountNumber === "string" ? accountNumber : null,
+        sortCode: typeof sortCode === "string" ? sortCode : null,
+        statementBalance: typeof statementBalance === "number" ? statementBalance : null,
+        statementDate: statementDate ? new Date(String(statementDate)) : null,
+        statementDueDate: statementDueDate ? new Date(String(statementDueDate)) : null,
+        statementPaidAmount: typeof statementPaidAmount === "number" ? statementPaidAmount : null,
         status: "active",
         tags: bankName ? `bank:${bankName}` : null,
         balance: Number.isFinite(Number(balance)) ? Number(balance) : 0,
@@ -469,6 +1044,7 @@ app.post("/api/bank/accounts", async (req, res) => {
 
 app.put("/api/bank/accounts/:id", async (req, res) => {
   try {
+    const userId = req.user.id;
     const body = req.body || {};
     const data = {};
     if (typeof body.name === "string") data.name = body.name;
@@ -476,6 +1052,12 @@ app.put("/api/bank/accounts/:id", async (req, res) => {
     if (typeof body.currency === "string") data.currency = body.currency;
     if (typeof body.mask === "string") data.mask = body.mask;
     if (typeof body.tags === "string") data.tags = body.tags;
+    if (typeof body.accountNumber === "string") data.accountNumber = body.accountNumber;
+    if (typeof body.sortCode === "string") data.sortCode = body.sortCode;
+    if (typeof body.statementBalance === "number") data.statementBalance = body.statementBalance;
+    if (body.statementDate) data.statementDate = new Date(String(body.statementDate));
+    if (body.statementDueDate) data.statementDueDate = new Date(String(body.statementDueDate));
+    if (typeof body.statementPaidAmount === "number") data.statementPaidAmount = body.statementPaidAmount;
     const balance = parseAmount(body.balance);
     const availableBalance = parseAmount(body.availableBalance);
     const limit = parseAmount(body.limit);
@@ -486,11 +1068,15 @@ app.put("/api/bank/accounts/:id", async (req, res) => {
       res.status(400).json({ error: "No fields to update" });
       return;
     }
-    const account = await prisma.bankAccount.update({
-      where: { id: req.params.id },
+    const updated = await prisma.bankAccount.updateMany({
+      where: { id: req.params.id, userId },
       data,
     });
-    res.json({ success: true, data: account });
+    if (!updated.count) {
+      res.status(404).json({ error: "Account not found" });
+      return;
+    }
+    res.json({ success: true });
   } catch (error) {
     console.error("Failed to update bank account:", error);
     res.status(500).json({ error: "Failed to update bank account" });
@@ -499,10 +1085,14 @@ app.put("/api/bank/accounts/:id", async (req, res) => {
 
 app.get("/api/credentials/accounts", async (req, res) => {
   try {
+    const userId = req.user.id;
     const bankAccountId = req.query.bankAccountId ? String(req.query.bankAccountId) : undefined;
     const includePayload = String(req.query.includePayload || "") === "true";
     const credentials = await prisma.bankAccountCredential.findMany({
-      where: bankAccountId ? { bankAccountId } : undefined,
+      where: {
+        userId,
+        ...(bankAccountId ? { bankAccountId } : {}),
+      },
       select: {
         id: true,
         bankAccountId: true,
@@ -522,15 +1112,23 @@ app.get("/api/credentials/accounts", async (req, res) => {
 
 app.post("/api/credentials/accounts", async (req, res) => {
   try {
+    const userId = req.user.id;
     const { bankAccountId, label, encryptedPayload } = req.body || {};
     if (!bankAccountId || !encryptedPayload) {
       res.status(400).json({ error: "bankAccountId and encryptedPayload are required" });
       return;
     }
+    const account = await prisma.bankAccount.findFirst({
+      where: { id: bankAccountId, userId },
+    });
+    if (!account) {
+      res.status(404).json({ error: "Bank account not found" });
+      return;
+    }
     const record = await prisma.bankAccountCredential.upsert({
       where: { bankAccountId },
-      update: { label: label || null, encryptedPayload },
-      create: { bankAccountId, label: label || null, encryptedPayload },
+      update: { label: label || null, encryptedPayload, userId },
+      create: { bankAccountId, label: label || null, encryptedPayload, userId },
     });
     res.status(201).json({ success: true, data: record });
   } catch (error) {
@@ -541,10 +1139,14 @@ app.post("/api/credentials/accounts", async (req, res) => {
 
 app.get("/api/credentials/cards", async (req, res) => {
   try {
+    const userId = req.user.id;
     const cardId = req.query.cardId ? String(req.query.cardId) : undefined;
     const includePayload = String(req.query.includePayload || "") === "true";
     const credentials = await prisma.cardCredential.findMany({
-      where: cardId ? { cardId } : undefined,
+      where: {
+        userId,
+        ...(cardId ? { cardId } : {}),
+      },
       select: {
         id: true,
         cardId: true,
@@ -564,15 +1166,21 @@ app.get("/api/credentials/cards", async (req, res) => {
 
 app.post("/api/credentials/cards", async (req, res) => {
   try {
+    const userId = req.user.id;
     const { cardId, label, encryptedPayload } = req.body || {};
     if (!cardId || !encryptedPayload) {
       res.status(400).json({ error: "cardId and encryptedPayload are required" });
       return;
     }
+    const card = await prisma.card.findFirst({ where: { id: cardId, userId } });
+    if (!card) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
     const record = await prisma.cardCredential.upsert({
       where: { cardId },
-      update: { label: label || null, encryptedPayload },
-      create: { cardId, label: label || null, encryptedPayload },
+      update: { label: label || null, encryptedPayload, userId },
+      create: { cardId, label: label || null, encryptedPayload, userId },
     });
     res.status(201).json({ success: true, data: record });
   } catch (error) {
@@ -583,9 +1191,10 @@ app.post("/api/credentials/cards", async (req, res) => {
 
 app.post("/api/bank/exchange", async (req, res) => {
   try {
-    const { code, userId, redirectUri } = req.body || {};
-    if (!code || !userId) {
-      res.status(400).json({ success: false, error: "code and userId are required" });
+    const { code, redirectUri } = req.body || {};
+    const userId = req.user.id;
+    if (!code) {
+      res.status(400).json({ success: false, error: "code is required" });
       return;
     }
 
@@ -616,7 +1225,22 @@ app.get("/api/bank/callback", async (req, res) => {
   try {
     const code = req.query.code ? String(req.query.code) : null;
     const state = req.query.state ? String(req.query.state) : "";
-    const userId = req.query.userId ? String(req.query.userId) : state || "sandbox-user";
+    let userId = null;
+    if (state) {
+      try {
+        const payload = verifyAccessToken(state);
+        userId = payload.sub;
+      } catch {
+        userId = null;
+      }
+    }
+    if (!userId && req.query.userId && process.env.NODE_ENV !== "production") {
+      userId = String(req.query.userId);
+    }
+    if (!userId) {
+      res.status(400).json({ success: false, error: "Missing user state" });
+      return;
+    }
     const redirectUri = process.env.TRUELAYER_REDIRECT_URI || "http://localhost:8081/api/bank/callback";
 
     if (!code) {
@@ -646,24 +1270,34 @@ app.get("/api/bank/callback", async (req, res) => {
     for (const acct of accounts) {
       const balancePayload = await fetchAccountBalance(tokenData.access_token, acct.account_id).catch(() => null);
       const balancePatch = normalizeBalancePayload(balancePayload);
+      const rawIban = acct.account_number?.iban || acct.account_number?.number || "";
+      const derived = deriveUkAccountDetails(rawIban);
+      const accountNumber = acct.account_number?.number || derived.accountNumber || null;
+      const sortCode = acct.account_number?.sort_code || derived.sortCode || null;
       await prisma.bankAccount.upsert({
-        where: { providerAccountId: acct.account_id },
+        where: { userId_providerAccountId: { userId, providerAccountId: acct.account_id } },
         update: {
+          userId,
           connectionId: connection.id,
           type: acct.account_type || acct.type || null,
           name: acct.display_name || acct.account_id || null,
           currency: acct.currency || null,
           mask: acct.account_number?.iban || acct.account_number?.number?.slice(-4) || null,
+          accountNumber,
+          sortCode,
           status: "active",
           ...balancePatch,
         },
         create: {
+          userId,
           connectionId: connection.id,
           providerAccountId: acct.account_id,
           type: acct.account_type || acct.type || null,
           name: acct.display_name || acct.account_id || null,
           currency: acct.currency || null,
           mask: acct.account_number?.iban || acct.account_number?.number?.slice(-4) || null,
+          accountNumber,
+          sortCode,
           status: "active",
           balance: balancePatch.balance ?? 0,
           availableBalance: balancePatch.availableBalance ?? null,
@@ -678,8 +1312,9 @@ app.get("/api/bank/callback", async (req, res) => {
       const cardBalancePayload = await fetchCardBalance(tokenData.access_token, providerId).catch(() => null);
       const cardBalancePatch = normalizeBalancePayload(cardBalancePayload);
       await prisma.bankAccount.upsert({
-        where: { providerAccountId: providerId },
+        where: { userId_providerAccountId: { userId, providerAccountId: providerId } },
         update: {
+          userId,
           connectionId: connection.id,
           type: "card",
           name: card.display_name || card.name_on_card || card.card_network || card.card_type || null,
@@ -689,6 +1324,7 @@ app.get("/api/bank/callback", async (req, res) => {
           ...cardBalancePatch,
         },
         create: {
+          userId,
           connectionId: connection.id,
           providerAccountId: providerId,
           type: "card",
@@ -705,17 +1341,18 @@ app.get("/api/bank/callback", async (req, res) => {
 
     for (const acct of accounts) {
       const txns = await fetchTransactions(tokenData.access_token, acct.account_id).catch(() => []);
-      const accountId = await ensureAccountId(connection.id, acct.account_id, "account");
+      const accountId = await ensureAccountId(userId, connection.id, acct.account_id, "account");
       for (const tx of txns) {
         const providerTransactionId = tx.transaction_id || tx.id || tx.normalised_provider_transaction_id;
         if (!providerTransactionId) continue;
         const rawString = JSON.stringify(tx);
         const direction = tx.amount?.value && tx.amount.value < 0 ? "debit" : "credit";
-        const mappedCategory = await resolveTransactionCategory(tx);
+        const { category: mappedCategory } = await resolveTransactionCategory(tx, userId);
         const runningBalance = parseAmount(tx.running_balance ?? tx.balance ?? null);
         await prisma.bankTransaction.upsert({
-          where: { providerTransactionId },
+          where: { userId_providerTransactionId: { userId, providerTransactionId } },
           update: {
+            userId,
             accountId,
             amount: tx.amount?.value ?? tx.amount ?? 0,
             currency: tx.amount?.currency ?? tx.currency ?? null,
@@ -729,6 +1366,7 @@ app.get("/api/bank/callback", async (req, res) => {
             raw: rawString,
           },
           create: {
+            userId,
             accountId,
             providerTransactionId,
             amount: tx.amount?.value ?? tx.amount ?? 0,
@@ -750,17 +1388,18 @@ app.get("/api/bank/callback", async (req, res) => {
       const providerId = card.card_id || card.account_id || card.resource_id || card.display_name || card.name_on_card;
       if (!providerId) continue;
       const txns = await fetchCardTransactions(tokenData.access_token, providerId).catch(() => []);
-      const accountId = await ensureAccountId(connection.id, providerId, "card");
+      const accountId = await ensureAccountId(userId, connection.id, providerId, "card");
       for (const tx of txns) {
         const providerTransactionId = tx.transaction_id || tx.id || tx.normalised_provider_transaction_id;
         if (!providerTransactionId) continue;
         const rawString = JSON.stringify(tx);
         const direction = tx.amount?.value && tx.amount.value < 0 ? "debit" : "credit";
-        const mappedCategory = await resolveTransactionCategory(tx);
+        const { category: mappedCategory } = await resolveTransactionCategory(tx, userId);
         const runningBalance = parseAmount(tx.running_balance ?? tx.balance ?? null);
         await prisma.bankTransaction.upsert({
-          where: { providerTransactionId },
+          where: { userId_providerTransactionId: { userId, providerTransactionId } },
           update: {
+            userId,
             accountId,
             amount: tx.amount?.value ?? tx.amount ?? 0,
             currency: tx.amount?.currency ?? tx.currency ?? null,
@@ -774,6 +1413,7 @@ app.get("/api/bank/callback", async (req, res) => {
             raw: rawString,
           },
           create: {
+            userId,
             accountId,
             providerTransactionId,
             amount: tx.amount?.value ?? tx.amount ?? 0,
@@ -801,11 +1441,12 @@ app.get("/api/bank/callback", async (req, res) => {
 
 app.post("/api/bank/sync", async (req, res) => {
   try {
-    const { userId, accountId, fromDate, toDate } = req.body || {};
+    const { accountId, fromDate, toDate } = req.body || {};
+    const userId = req.user.id;
     let connections;
     if (accountId) {
-      const acct = await prisma.bankAccount.findUnique({
-        where: { id: accountId },
+      const acct = await prisma.bankAccount.findFirst({
+        where: { id: accountId, userId },
         include: { connection: true },
       });
       if (!acct || !acct.connection) {
@@ -815,7 +1456,7 @@ app.post("/api/bank/sync", async (req, res) => {
       connections = [acct.connection];
     } else {
       connections = await prisma.bankConnection.findMany({
-        where: userId ? { userId } : undefined,
+        where: { userId },
       });
     }
 
@@ -832,6 +1473,8 @@ app.post("/api/bank/sync", async (req, res) => {
               name: acct.display_name || acct.account_id,
               currency: acct.currency,
               mask: acct.account_number?.iban || acct.account_number?.number?.slice(-4),
+              accountNumber: acct.account_number?.number || deriveUkAccountDetails(acct.account_number?.iban || acct.account_number?.number || "").accountNumber || null,
+              sortCode: acct.account_number?.sort_code || deriveUkAccountDetails(acct.account_number?.iban || acct.account_number?.number || "").sortCode || null,
             }))
             .filter((acct) => acct.id),
           ...cards
@@ -851,24 +1494,33 @@ app.post("/api/bank/sync", async (req, res) => {
               ? await fetchCardBalance(connection.accessToken, acct.id).catch(() => null)
               : await fetchAccountBalance(connection.accessToken, acct.id).catch(() => null);
           const balancePatch = normalizeBalancePayload(balancePayload);
+          const derived = deriveUkAccountDetails(acct.mask || "");
+          const accountNumber = acct.accountNumber || derived.accountNumber || null;
+          const sortCode = acct.sortCode || derived.sortCode || null;
           const account = await prisma.bankAccount.upsert({
-            where: { providerAccountId: acct.id },
+            where: { userId_providerAccountId: { userId, providerAccountId: acct.id } },
             update: {
+              userId,
               connectionId: connection.id,
               type: acct.type,
               name: acct.name,
               currency: acct.currency,
               mask: acct.mask,
+              accountNumber,
+              sortCode,
               status: "active",
               ...balancePatch,
             },
             create: {
+              userId,
               connectionId: connection.id,
               providerAccountId: acct.id,
               type: acct.type,
               name: acct.name,
               currency: acct.currency,
               mask: acct.mask,
+              accountNumber,
+              sortCode,
               status: "active",
               balance: balancePatch.balance ?? 0,
               availableBalance: balancePatch.availableBalance ?? null,
@@ -887,11 +1539,12 @@ app.post("/api/bank/sync", async (req, res) => {
             if (!providerTransactionId) continue;
             const rawString = JSON.stringify(tx);
             const direction = tx.amount?.value && tx.amount.value < 0 ? "debit" : "credit";
-            const mappedCategory = await resolveTransactionCategory(tx);
+            const { category: mappedCategory } = await resolveTransactionCategory(tx, userId);
             const runningBalance = parseAmount(tx.running_balance ?? tx.balance ?? null);
             await prisma.bankTransaction.upsert({
-              where: { providerTransactionId },
+              where: { userId_providerTransactionId: { userId, providerTransactionId } },
               update: {
+                userId,
                 accountId: account.id,
                 amount: tx.amount?.value ?? tx.amount ?? 0,
                 currency: tx.amount?.currency ?? tx.currency ?? null,
@@ -905,6 +1558,7 @@ app.post("/api/bank/sync", async (req, res) => {
                 raw: rawString,
               },
               create: {
+                userId,
                 accountId: account.id,
                 providerTransactionId,
                 amount: tx.amount?.value ?? tx.amount ?? 0,
@@ -923,6 +1577,7 @@ app.post("/api/bank/sync", async (req, res) => {
 
           const existingRows = await prisma.bankTransaction.findMany({
             where: {
+              userId,
               accountId: account.id,
               ...(fromDate || toDate
                 ? {
@@ -948,7 +1603,7 @@ app.post("/api/bank/sync", async (req, res) => {
             if (!parsed.description && row.descriptionVia) parsed.description = row.descriptionVia;
             const merchantKey = buildMerchantKey(parsed);
             const rule = merchantKey
-              ? await prisma.merchantCategoryRule.findUnique({ where: { merchantKey } })
+              ? await prisma.merchantCategoryRule.findUnique({ where: { userId_merchantKey: { userId, merchantKey } } })
               : null;
             const mapped = rule?.category || mapOpenBankingCategory(parsed);
             if (mapped && mapped !== row.category) {
@@ -971,8 +1626,10 @@ app.post("/api/bank/sync", async (req, res) => {
   }
 });
 
-async function ensureAccountId(connectionId, providerAccountId, type) {
-  const existing = await prisma.bankAccount.findUnique({ where: { providerAccountId } });
+async function ensureAccountId(userId, connectionId, providerAccountId, type) {
+  const existing = await prisma.bankAccount.findFirst({
+    where: { userId, providerAccountId },
+  });
   if (existing) {
     if (type && existing.type !== type) {
       await prisma.bankAccount.update({
@@ -984,6 +1641,7 @@ async function ensureAccountId(connectionId, providerAccountId, type) {
   }
   const created = await prisma.bankAccount.create({
     data: {
+      userId,
       connectionId,
       providerAccountId,
       type: type || "account",
@@ -995,6 +1653,7 @@ async function ensureAccountId(connectionId, providerAccountId, type) {
 
 app.get("/api/transactions/drafts", async (req, res) => {
   try {
+    const userId = req.user.id;
     const page = Number(req.query.page || "1");
     const pageSize = Number(req.query.pageSize || "15");
     const search = req.query.search ? String(req.query.search) : undefined;
@@ -1003,7 +1662,7 @@ app.get("/api/transactions/drafts", async (req, res) => {
     const fromDate = req.query.fromDate ? String(req.query.fromDate) : undefined;
     const toDate = req.query.toDate ? String(req.query.toDate) : undefined;
 
-    const where = {};
+    const where = { userId };
     const orFilters = [];
     if (search) {
       orFilters.push(
@@ -1033,9 +1692,43 @@ app.get("/api/transactions/drafts", async (req, res) => {
       }),
     ]);
 
+    const parsedById = new Map();
+    const merchantKeys = [];
+    for (const draft of drafts) {
+      let parsed = {};
+      if (draft.raw) {
+        try {
+          parsed = JSON.parse(draft.raw);
+        } catch {
+          parsed = {};
+        }
+      }
+      if (!parsed.description && draft.descriptionVia) parsed.description = draft.descriptionVia;
+      if (!parsed.merchant_name && draft.merchant) parsed.merchant_name = draft.merchant;
+      const merchantKey = buildMerchantKey(parsed);
+      if (merchantKey) merchantKeys.push(merchantKey);
+      parsedById.set(draft.id, { parsed, merchantKey });
+    }
+    const uniqueMerchantKeys = Array.from(new Set(merchantKeys));
+    const rules = uniqueMerchantKeys.length
+      ? await prisma.merchantCategoryRule.findMany({
+          where: { userId, merchantKey: { in: uniqueMerchantKeys } },
+        })
+      : [];
+    const ruleMap = new Map(rules.map((rule) => [rule.merchantKey, rule]));
+
+    const draftsWithSource = drafts.map((draft) => {
+      const info = parsedById.get(draft.id) || {};
+      const merchantKey = info.merchantKey;
+      const parsed = info.parsed || {};
+      const rule = merchantKey ? ruleMap.get(merchantKey) : null;
+      const source = rule?.source || resolveOpenBankingCategory(parsed).source || "fallback";
+      return { ...draft, categorySource: source };
+    });
+
     res.json({
       success: true,
-      data: drafts,
+      data: draftsWithSource,
       meta: { total, page, pageSize },
     });
   } catch (error) {
@@ -1046,6 +1739,7 @@ app.get("/api/transactions/drafts", async (req, res) => {
 
 app.post("/api/transactions/drafts", async (req, res) => {
   try {
+    const userId = req.user.id;
     const body = req.body || {};
     const amount = typeof body.amount === "number" ? body.amount : Number(body.amount || 0);
     const bookingDate = body.date ? new Date(String(body.date)) : new Date();
@@ -1059,9 +1753,19 @@ app.post("/api/transactions/drafts", async (req, res) => {
     const cleanedAttachments = attachments
       .map((item) => (typeof item === "string" ? item.trim() : ""))
       .filter(Boolean);
+    if (typeof body.accountId === "string") {
+      const account = await prisma.bankAccount.findFirst({
+        where: { id: body.accountId, userId },
+      });
+      if (!account) {
+        res.status(404).json({ success: false, error: "Account not found" });
+        return;
+      }
+    }
     const created = await prisma.bankTransaction.create({
       data: {
         id: `manual-${Date.now()}`,
+        userId,
         accountId: typeof body.accountId === "string" ? body.accountId : "",
         providerTransactionId:
           typeof body.providerTransactionId === "string" ? body.providerTransactionId : `manual-${Date.now()}`,
@@ -1083,6 +1787,7 @@ app.post("/api/transactions/drafts", async (req, res) => {
         raw: typeof body.raw === "string" ? body.raw : null,
         meta: {
           create: {
+            userId,
             openingBalance: typeof body.openingBalance === "number" ? body.openingBalance : body.openingBalance ? Number(body.openingBalance) : null,
             closingBalance: typeof body.closingBalance === "number" ? body.closingBalance : body.closingBalance ? Number(body.closingBalance) : null,
             fromEntity: typeof body.fromEntity === "string" ? body.fromEntity : null,
@@ -1104,8 +1809,53 @@ app.post("/api/transactions/drafts", async (req, res) => {
   }
 });
 
+app.post("/api/merchant-rules/from-transaction", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const transactionId = typeof req.body?.transactionId === "string" ? req.body.transactionId : "";
+    const source = typeof req.body?.source === "string" ? req.body.source : "internet";
+    if (!transactionId) {
+      res.status(400).json({ success: false, error: "transactionId is required" });
+      return;
+    }
+    const tx = await prisma.bankTransaction.findFirst({
+      where: { id: transactionId, userId },
+    });
+    if (!tx) {
+      res.status(404).json({ success: false, error: "Transaction not found" });
+      return;
+    }
+    let parsed = {};
+    if (tx.raw) {
+      try {
+        parsed = JSON.parse(tx.raw);
+      } catch {
+        parsed = {};
+      }
+    }
+    if (!parsed.description && tx.descriptionVia) parsed.description = tx.descriptionVia;
+    if (!parsed.merchant_name && tx.merchant) parsed.merchant_name = tx.merchant;
+    const merchantKey = buildMerchantKey(parsed);
+    if (!merchantKey) {
+      res.status(400).json({ success: false, error: "Merchant key unavailable" });
+      return;
+    }
+    const category = tx.category || mapOpenBankingCategory(parsed);
+    const rule = await prisma.merchantCategoryRule.upsert({
+      where: { userId_merchantKey: { userId, merchantKey } },
+      update: { category, source },
+      create: { userId, merchantKey, category, source },
+    });
+    res.json({ success: true, rule });
+  } catch (error) {
+    console.error("merchant rule update error", error);
+    res.status(500).json({ success: false, error: "Failed to update rule" });
+  }
+});
+
 app.patch("/api/transactions/drafts/:id", async (req, res) => {
   try {
+    const userId = req.user.id;
     const body = req.body || {};
     const data = {};
     if (typeof body.merchantTo === "string") data.merchant = body.merchantTo;
@@ -1160,6 +1910,13 @@ app.patch("/api/transactions/drafts/:id", async (req, res) => {
       res.status(400).json({ success: false, error: "No fields to update" });
       return;
     }
+    const existing = await prisma.bankTransaction.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ success: false, error: "Transaction not found" });
+      return;
+    }
     const updated = await prisma.bankTransaction.update({
       where: { id: req.params.id },
       data: {
@@ -1167,7 +1924,7 @@ app.patch("/api/transactions/drafts/:id", async (req, res) => {
         meta: Object.keys(metaUpdate).length
           ? {
               upsert: {
-                create: metaUpdate,
+                create: { ...metaUpdate, userId },
                 update: metaUpdate,
               },
             }
@@ -1184,7 +1941,8 @@ app.patch("/api/transactions/drafts/:id", async (req, res) => {
 
 app.delete("/api/transactions/drafts/:id", async (req, res) => {
   try {
-    const existing = await prisma.bankTransaction.findUnique({ where: { id: req.params.id } });
+    const userId = req.user.id;
+    const existing = await prisma.bankTransaction.findFirst({ where: { id: req.params.id, userId } });
     if (!existing) {
       res.status(404).json({ success: false, error: "Transaction not found" });
       return;
@@ -1204,8 +1962,9 @@ app.delete("/api/transactions/drafts/:id", async (req, res) => {
 
 app.post("/api/transactions/drafts/:id/approve", async (req, res) => {
   try {
-    const bankTx = await prisma.bankTransaction.findUnique({
-      where: { id: req.params.id },
+    const userId = req.user.id;
+    const bankTx = await prisma.bankTransaction.findFirst({
+      where: { id: req.params.id, userId },
       include: { account: true },
     });
     if (!bankTx) {
@@ -1215,8 +1974,8 @@ app.post("/api/transactions/drafts/:id/approve", async (req, res) => {
 
     const providerTxId = bankTx.providerTransactionId || undefined;
     if (providerTxId) {
-      const existing = await prisma.transaction.findUnique({
-        where: { providerTxId },
+      const existing = await prisma.transaction.findFirst({
+        where: { userId, providerTxId },
         select: { id: true },
       });
       if (existing) {
@@ -1227,9 +1986,13 @@ app.post("/api/transactions/drafts/:id/approve", async (req, res) => {
 
     const amount = bankTx.amount ?? 0;
     const merchant = bankTx.merchant || bankTx.descriptionVia || "Unknown";
+    const card = bankTx.account?.type === "card"
+      ? await prisma.card.findFirst({ where: { userId, name: bankTx.account?.name || "" } })
+      : null;
     await prisma.transaction.create({
       data: {
-        cardId: null,
+        userId,
+        cardId: card?.id || null,
         providerTxId: providerTxId || null,
         merchant,
         amount: Math.abs(amount),
@@ -1250,8 +2013,9 @@ app.post("/api/transactions/drafts/:id/approve", async (req, res) => {
 
 app.get("/api/transactions", async (req, res) => {
   try {
+    const userId = req.user.id;
     const { cardId, category, transactionType, dateFrom, dateTo, limit } = req.query;
-    const where = {};
+    const where = { userId };
     if (cardId) where.cardId = String(cardId);
     if (category) where.category = String(category);
     if (transactionType) where.transactionType = String(transactionType);
@@ -1275,8 +2039,9 @@ app.get("/api/transactions", async (req, res) => {
 
 app.get("/api/transactions/:id", async (req, res) => {
   try {
-    const transaction = await prisma.transaction.findUnique({
-      where: { id: req.params.id },
+    const userId = req.user.id;
+    const transaction = await prisma.transaction.findFirst({
+      where: { id: req.params.id, userId },
       include: { card: true },
     });
     if (!transaction) {
@@ -1292,15 +2057,24 @@ app.get("/api/transactions/:id", async (req, res) => {
 
 app.post("/api/transactions", async (req, res) => {
   try {
+    const userId = req.user.id;
     const payload = req.body || {};
     if (!payload.merchant || payload.amount === undefined || !payload.category) {
       res.status(400).json({ error: "merchant, amount, and category are required" });
       return;
     }
+    if (payload.cardId) {
+      const card = await prisma.card.findFirst({ where: { id: payload.cardId, userId } });
+      if (!card) {
+        res.status(404).json({ error: "Card not found" });
+        return;
+      }
+    }
     const transactionType = payload.transactionType || "expense";
     await prisma.$transaction(async (tx) => {
       await tx.transaction.create({
         data: {
+          userId,
           cardId: payload.cardId || null,
           merchant: payload.merchant,
           amount: Number(payload.amount),
@@ -1329,11 +2103,21 @@ app.post("/api/transactions", async (req, res) => {
 
 app.put("/api/transactions/:id", async (req, res) => {
   try {
+    const userId = req.user.id;
     const payload = req.body || {};
-    const oldTransaction = await prisma.transaction.findUnique({ where: { id: req.params.id } });
+    const oldTransaction = await prisma.transaction.findFirst({
+      where: { id: req.params.id, userId },
+    });
     if (!oldTransaction) {
       res.status(404).json({ error: "Transaction not found" });
       return;
+    }
+    if (payload.cardId) {
+      const card = await prisma.card.findFirst({ where: { id: payload.cardId, userId } });
+      if (!card) {
+        res.status(404).json({ error: "Card not found" });
+        return;
+      }
     }
     await prisma.$transaction(async (tx) => {
       await tx.transaction.update({
@@ -1386,7 +2170,8 @@ app.put("/api/transactions/:id", async (req, res) => {
 
 app.delete("/api/transactions/:id", async (req, res) => {
   try {
-    const existing = await prisma.transaction.findUnique({ where: { id: req.params.id } });
+    const userId = req.user.id;
+    const existing = await prisma.transaction.findFirst({ where: { id: req.params.id, userId } });
     if (!existing) {
       res.status(404).json({ error: "Transaction not found" });
       return;
@@ -1407,9 +2192,11 @@ app.delete("/api/transactions/:id", async (req, res) => {
   }
 });
 
-app.get("/api/analytics/spending-by-category", async (_req, res) => {
+app.get("/api/analytics/spending-by-category", async (req, res) => {
   try {
+    const userId = req.user.id;
     const transactions = await prisma.bankTransaction.findMany({
+      where: { userId },
       select: { category: true, amount: true },
     });
     const categoryTotals = transactions.reduce((acc, transaction) => {
@@ -1428,9 +2215,11 @@ app.get("/api/analytics/spending-by-category", async (_req, res) => {
   }
 });
 
-app.get("/api/analytics/monthly", async (_req, res) => {
+app.get("/api/analytics/monthly", async (req, res) => {
   try {
+    const userId = req.user.id;
     const transactions = await prisma.bankTransaction.findMany({
+      where: { userId },
       select: { date: true, amount: true },
       orderBy: { date: "asc" },
     });
@@ -1453,9 +2242,11 @@ app.get("/api/analytics/monthly", async (_req, res) => {
   }
 });
 
-app.get("/api/analytics/by-card", async (_req, res) => {
+app.get("/api/analytics/by-card", async (req, res) => {
   try {
+    const userId = req.user.id;
     const transactions = await prisma.bankTransaction.findMany({
+      where: { userId },
       include: { account: true },
     });
     const cardTotals = transactions.reduce((acc, transaction) => {
@@ -1476,9 +2267,11 @@ app.get("/api/analytics/by-card", async (_req, res) => {
   }
 });
 
-app.get("/api/analytics/by-merchant", async (_req, res) => {
+app.get("/api/analytics/by-merchant", async (req, res) => {
   try {
+    const userId = req.user.id;
     const transactions = await prisma.bankTransaction.findMany({
+      where: { userId },
       select: { merchant: true, descriptionVia: true, amount: true },
     });
     const merchantTotals = transactions.reduce((acc, transaction) => {
@@ -1497,12 +2290,14 @@ app.get("/api/analytics/by-merchant", async (_req, res) => {
   }
 });
 
-app.get("/api/insights", async (_req, res) => {
+app.get("/api/insights", async (req, res) => {
   try {
+    const userId = req.user.id;
     const insights = [];
-    const cards = await prisma.card.findMany();
+    const cards = await prisma.card.findMany({ where: { userId } });
     const transactions = await prisma.bankTransaction.findMany({
       where: {
+        userId,
         date: {
           gte: new Date(new Date().setMonth(new Date().getMonth() - 1)),
         },
@@ -1576,6 +2371,7 @@ app.get("/api/insights", async (_req, res) => {
 
     const lastMonthTransactions = await prisma.bankTransaction.findMany({
       where: {
+        userId,
         date: {
           gte: lastMonth,
           lt: currentMonth,

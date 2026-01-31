@@ -18,7 +18,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { getApiBaseUrl } from "@/lib/api";
+import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { getMonthToDateRange } from "@/lib/utils";
 
 type SourceOption = {
@@ -38,6 +38,7 @@ type DraftRecord = {
     amount: number;
     currency?: string | null;
     category?: string | null;
+    categorySource?: string | null;
     date: string | null;
     remarks?: string | null;
     raw?: string | null;
@@ -100,6 +101,27 @@ const SYNC_MODES = [
 const PAGE_SIZE = 15;
 type SyncModeOption = (typeof SYNC_MODES)[number]["value"];
 
+const categorySourceLabel = (source?: string | null) => {
+    if (!source) return "Mapped via rules";
+    if (source === "keyword") return "Mapped via keywords";
+    if (source === "provider") return "Mapped via provider";
+    if (source === "mcc") return "Mapped via MCC";
+    if (source === "internet") return "Mapped via internet";
+    if (source === "manual") return "Manual";
+    return "Auto mapped";
+};
+
+const getAuthHeaders = () => {
+    const headers = new Headers();
+    try {
+        const token = localStorage.getItem("cardsense_token") || "";
+        if (token) headers.set("Authorization", `Bearer ${token}`);
+    } catch {
+        // ignore
+    }
+    return headers;
+};
+
 export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialMeta, categories }: TransactionsWorkbenchProps) {
     const monthToDate = useMemo(() => getMonthToDateRange(), []);
     const [syncMode, setSyncMode] = useState<SyncModeOption>("all");
@@ -113,6 +135,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
     const [meta, setMeta] = useState<Meta>(initialMeta);
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [dialog, setDialog] = useState<DialogState>({ mode: null });
+    const [mappingLoading, setMappingLoading] = useState(false);
     const [editForm, setEditForm] = useState({
         merchantName: "",
         amount: "",
@@ -208,6 +231,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             headAccount: draft.meta?.headAccount ?? null,
             attachments,
             comments: draft.meta?.comments ?? null,
+            categorySource: draft.categorySource ?? null,
         };
     }, [buildAccountLabel]);
 
@@ -321,6 +345,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             if (toDateValue) params.set("toDate", toDateValue);
             const response = await fetch(`${getApiBaseUrl()}/api/transactions/drafts?${params.toString()}`, {
                 cache: "no-store",
+                headers: getAuthHeaders(),
             });
             const data = await readJson<DraftListResponse>(response);
             if (!response.ok || !data.success) {
@@ -391,7 +416,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             };
             const response = await fetch(`${getApiBaseUrl()}/api/bank/sync`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", ...Object.fromEntries(getAuthHeaders()) },
                 body: JSON.stringify(payload),
             });
             const result = await readJson<{ success: boolean; synced?: number; error?: string }>(response);
@@ -414,7 +439,10 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         setRowLoadingId(id);
         setFeedback(null);
         try {
-            const response = await fetch(`${getApiBaseUrl()}/api/transactions/drafts/${id}`, { method: "DELETE" });
+            const response = await fetch(`${getApiBaseUrl()}/api/transactions/drafts/${id}`, {
+                method: "DELETE",
+                headers: getAuthHeaders(),
+            });
             const data = await readJson<{ success: boolean; error?: string }>(response);
             if (!response.ok || !data.success) throw new Error(data.error || "Delete failed");
             await fetchDrafts(1);
@@ -423,6 +451,27 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             setFeedback({ type: "error", message: getErrorMessage(error) || "Delete failed" });
         } finally {
             setRowLoadingId(null);
+        }
+    };
+
+    const markInternetMapping = async () => {
+        if (!dialog.draft?.id) return;
+        setMappingLoading(true);
+        setFeedback(null);
+        try {
+            const result = await apiFetch<{ success: boolean; error?: string }>(`/api/merchant-rules/from-transaction`, {
+                method: "POST",
+                body: JSON.stringify({ transactionId: dialog.draft.id, source: "internet" }),
+            });
+            if (!result.success) {
+                throw new Error(result.error || "Failed to mark mapping.");
+            }
+            setFeedback({ type: "success", message: "Marked as internet-mapped." });
+            await fetchDrafts(meta.page || 1);
+        } catch (error: unknown) {
+            setFeedback({ type: "error", message: getErrorMessage(error) || "Failed to mark mapping." });
+        } finally {
+            setMappingLoading(false);
         }
     };
 
@@ -546,7 +595,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             };
             const response = await fetch(`${getApiBaseUrl()}/api/transactions/drafts/${dialog.draft.id}`, {
                 method: "PATCH",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", ...Object.fromEntries(getAuthHeaders()) },
                 body: JSON.stringify(payload),
             });
             const data = await readJson<{ success: boolean; data: DraftRecord; error?: string }>(response);
@@ -588,7 +637,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             };
             const response = await fetch(`${getApiBaseUrl()}/api/transactions/drafts`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", ...Object.fromEntries(getAuthHeaders()) },
                 body: JSON.stringify(payload),
             });
             const data = await readJson<{ success: boolean; data: DraftRecord; error?: string }>(response);
@@ -958,7 +1007,12 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                                         : "—"}
                                                 </td>
                                                 <td className="px-4 py-3">{draft.headAccount || "—"}</td>
-                                                <td className="px-4 py-3">{draft.category || "—"}</td>
+                                                <td className="px-4 py-3">
+                                                    <div className="font-medium text-slate-900">{draft.category || "—"}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        {categorySourceLabel(draft.categorySource)}
+                                                    </div>
+                                                </td>
                                                 <td className="px-4 py-3">{draft.subCategory || "—"}</td>
                                                 <td className="px-4 py-3">{draft.remarks || "—"}</td>
                                                 <td className="px-4 py-3">
@@ -1249,6 +1303,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                 <div>
                                     <p className="text-xs uppercase text-muted-foreground">Category</p>
                                     <p>{dialog.draft.category || "—"}</p>
+                                    <p className="text-xs text-muted-foreground">{categorySourceLabel(dialog.draft.categorySource)}</p>
                                 </div>
                                 <div>
                                     <p className="text-xs uppercase text-muted-foreground">Sub-category</p>
@@ -1342,6 +1397,20 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                    {dialog.mode === "edit" && (
+                                        <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={mappingLoading}
+                                                onClick={markInternetMapping}
+                                            >
+                                                {mappingLoading ? "Marking..." : "Mark as internet-mapped"}
+                                            </Button>
+                                            <span>{categorySourceLabel(dialog.draft?.categorySource)}</span>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label>Sub-category</Label>

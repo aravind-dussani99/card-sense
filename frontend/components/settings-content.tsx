@@ -9,24 +9,39 @@ import Link from "next/link"
 import { BankConnect } from "@/components/bank-connect"
 import { BankCredentialsManager } from "@/components/bank-credentials-manager"
 import { CardCredentialsManager } from "@/components/card-credentials-manager"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { apiFetch } from "@/lib/api"
 import { getErrorMessage } from "@/lib/errors"
 import { BankConnection } from "@/lib/types"
 import { clearPassphraseMarker, passphraseMarkerExists, setPassphraseMarker } from "@/lib/vault"
+import { getStoredVisibility, setStoredDuration } from "@/lib/balance-visibility"
 
 export function SettingsContent({ connections = [] }: { connections?: BankConnection[] }) {
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [localConnections, setLocalConnections] = useState<BankConnection[]>(connections);
-    const [passphraseSet, setPassphraseSet] = useState(() => {
-        if (typeof window === "undefined") return false;
-        return passphraseMarkerExists();
-    });
+    const [passphraseSet, setPassphraseSet] = useState(false);
+    const [passphraseLoaded, setPassphraseLoaded] = useState(false);
     const [passphrase, setPassphrase] = useState("");
     const [passphraseConfirm, setPassphraseConfirm] = useState("");
     const [passphraseStatus, setPassphraseStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+    const [balanceDuration, setBalanceDuration] = useState(30);
+    const [customDuration, setCustomDuration] = useState("");
+    const [durationMode, setDurationMode] = useState("30");
 
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        setPassphraseSet(passphraseMarkerExists());
+        setPassphraseLoaded(true);
+        const stored = getStoredVisibility();
+        setBalanceDuration(stored.duration);
+        const preset = ["10", "30", "60", "120"].includes(String(stored.duration))
+            ? String(stored.duration)
+            : "custom";
+        setDurationMode(preset);
+        if (preset === "custom") setCustomDuration(String(stored.duration));
+    }, []);
 
     const handleDisconnect = async (id: string, label: string) => {
         setFeedback(null);
@@ -68,6 +83,7 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
         setPassphraseConfirm("");
         setPassphraseStatus({ type: "success", message: "Passphrase cleared on this device." });
     };
+
 
     return (
         <div className="grid gap-6">
@@ -127,7 +143,11 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
                         </Alert>
                     )}
                     <div className="text-sm text-muted-foreground">
-                        {passphraseSet ? "Passphrase is set for this device." : "No passphrase set for this device."}
+                        {passphraseLoaded ? (
+                            passphraseSet ? "Passphrase is set for this device." : "No passphrase set for this device."
+                        ) : (
+                            "Checking passphrase status..."
+                        )}
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                         <div className="space-y-2">
@@ -206,7 +226,6 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
                     </div>
                 </CardContent>
             </Card>
-
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -240,6 +259,57 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
                         />
                         <p className="text-sm text-muted-foreground">
                             Preferred date format for transactions
+                        </p>
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="balanceVisibility">Balance visibility duration</Label>
+                        <select
+                            id="balanceVisibility"
+                            className="border rounded-md px-3 py-2 text-sm w-full max-w-[240px]"
+                            value={durationMode}
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                setDurationMode(value);
+                                if (value !== "custom") {
+                                    const seconds = Number(value);
+                                    setBalanceDuration(seconds);
+                                    setStoredDuration(seconds);
+                                }
+                            }}
+                        >
+                            <option value="10">10 seconds</option>
+                            <option value="30">30 seconds</option>
+                            <option value="60">60 seconds</option>
+                            <option value="120">120 seconds</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        {durationMode === "custom" && (
+                            <div className="flex items-center gap-2">
+                                <Input
+                                    type="number"
+                                    min="1"
+                                    placeholder="Seconds"
+                                    value={customDuration}
+                                    onChange={(e) => setCustomDuration(e.target.value)}
+                                    className="max-w-[140px]"
+                                />
+                                <Button
+                                    variant="outline"
+                                    type="button"
+                                    onClick={() => {
+                                        const seconds = Number(customDuration);
+                                        if (Number.isFinite(seconds) && seconds > 0) {
+                                            setBalanceDuration(seconds);
+                                            setStoredDuration(seconds);
+                                        }
+                                    }}
+                                >
+                                    Save
+                                </Button>
+                            </div>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                            Balances auto-hide after {balanceDuration}s when revealed.
                         </p>
                     </div>
                 </CardContent>

@@ -9,6 +9,8 @@ datasource db {
 
 model Card {
   id                       String                      @id @default(uuid())
+  userId                   String
+  user                     User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
   name                     String
   nameOnCard               String? // Name printed on the card
   bank                     String
@@ -42,9 +44,11 @@ model Card {
 
 model Transaction {
   id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   cardId          String?
   card            Card?    @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  providerTxId    String?  @unique
+  providerTxId    String?
   merchant        String
   amount          Float
   category        String
@@ -55,16 +59,22 @@ model Transaction {
   loanTo          String? // Person/entity who received the loan (for loan_given)
   loanFrom        String? // Person/entity who gave the loan (for loan_received)
   createdAt       DateTime @default(now())
+
+  @@unique([userId, providerTxId])
 }
 
 model Category {
   id                        String                      @id @default(uuid())
-  name                      String                      @unique
+  userId                    String?
+  user                      User?                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                      String
   icon                      String?
   color                     String?
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
   subCategories             SubCategory[]
+
+  @@unique([userId, name])
 }
 
 model SubCategory {
@@ -98,31 +108,96 @@ model Bank {
 
 model FromEntity {
   id        String   @id @default(uuid())
-  name      String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
   type      String? // "vendor", "company", "person", etc.
   icon      String?
   color     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
 }
 
 model ToEntity {
   id        String   @id @default(uuid())
-  name      String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
   type      String? // "vendor", "person", "debt", etc.
   icon      String?
   color     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model User {
+  id               String                     @id @default(uuid())
+  email            String                     @unique
+  passwordHash     String
+  name             String?
+  role             UserRole                   @default(USER)
+  emailVerifiedAt  DateTime?
+  lastLoginAt      DateTime?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  emailTokens      EmailVerificationToken[]
+  passwordTokens   PasswordResetToken[]
+  cards            Card[]
+  transactions     Transaction[]
+  categories       Category[]
+  fromEntities     FromEntity[]
+  toEntities       ToEntity[]
+  draftTransactions DraftTransaction[]
+  offers           Offer[]
+  processedEmails  ProcessedEmail[]
+  bankConnections  BankConnection[]
+  bankAccounts     BankAccount[]
+  bankTransactions BankTransaction[]
+  bankTransactionMeta BankTransactionMeta[]
+  bankAccountCredentials BankAccountCredential[]
+  cardCredentials  CardCredential[]
+  merchantRules    MerchantCategoryRule[]
+  chats            ChatSession[]
+}
+
+model EmailVerificationToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+}
+
+model PasswordResetToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
 }
 
 model DraftTransaction {
   id                String   @id @default(uuid())
-  emailId           String?  @unique // Email message ID to prevent duplicates (nullable for bank imports)
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailId           String? // Email message ID to prevent duplicates (nullable for bank imports)
   cardId            String?
   card              Card?    @relation(fields: [cardId], references: [id], onDelete: SetNull)
   bankAccountId     String? // Link to BankAccount if from Open Banking
-  providerTxId      String?  @unique // Provider transaction id to prevent duplicates
+  providerTxId      String? // Provider transaction id to prevent duplicates
   source            String? // "email", "statement", "open_banking"
   merchant          String
   amount            Float
@@ -139,11 +214,16 @@ model DraftTransaction {
   needsCardCreation Boolean  @default(false) // True if card/account needs to be created
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  @@unique([userId, providerTxId])
+  @@unique([userId, emailId])
 }
 
 model Offer {
   id              String   @id @default(uuid())
-  emailId         String   @unique // Email message ID to prevent duplicates
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailId         String // Email message ID to prevent duplicates
   title           String
   description     String
   cardId          String?
@@ -163,11 +243,15 @@ model Offer {
   emailBody       String? // Extracted email content
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@unique([userId, emailId])
 }
 
 model ProcessedEmail {
   id               String    @id @default(uuid())
-  emailId          String    @unique // Email message ID
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailId          String    // Email message ID
   emailSubject     String?
   originalDate     DateTime? // Original email date (when email was sent/received)
   processedAt      DateTime  @default(now())
@@ -177,12 +261,15 @@ model ProcessedEmail {
   errorMessage     String?
   emailBody        String? // Store email body for viewing in dialog
   createdAt        DateTime  @default(now())
+
+  @@unique([userId, emailId])
 }
 
 // Open Banking (TrueLayer or other providers)
 model BankConnection {
   id                String        @id @default(uuid())
-  userId            String // TODO: link to user model when available
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider          String // e.g., "truelayer"
   providerAccountId String // Provider connection id
   accessToken       String // Encrypted/tokenized at app layer
@@ -196,9 +283,11 @@ model BankConnection {
 
 model BankAccount {
   id                       String                      @id @default(uuid())
+  userId                   String
+  user                     User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
   connectionId             String
   connection               BankConnection              @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  providerAccountId        String                      @unique // account id from provider
+  providerAccountId        String // account id from provider
   type                     String? // card, checking, savings, etc.
   name                     String?
   productCode              String?
@@ -207,21 +296,31 @@ model BankAccount {
   tags                     String?
   currency                 String?
   mask                     String? // last4 or masked number
+  accountNumber            String?
+  sortCode                 String?
   balance                  Float                       @default(0)
   availableBalance         Float?
   limit                    Float?
+  statementBalance         Float?
+  statementDate            DateTime?
+  statementDueDate         DateTime?
+  statementPaidAmount      Float?
   status                   String                      @default("active")
   createdAt                DateTime                    @default(now())
   updatedAt                DateTime                    @updatedAt
   transactions             BankTransaction[]
   credentials              BankAccountCredential?
+
+  @@unique([userId, providerAccountId])
 }
 
 model BankTransaction {
   id                    String      @id @default(uuid())
+  userId                String
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   accountId             String
   account               BankAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  providerTransactionId String      @unique
+  providerTransactionId String
   amount                Float
   currency              String?
   descriptionVia        String?      @map("description")
@@ -235,10 +334,14 @@ model BankTransaction {
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
   meta                  BankTransactionMeta?
+
+  @@unique([userId, providerTransactionId])
 }
 
 model BankTransactionMeta {
   id                 String          @id @default(uuid())
+  userId             String
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   bankTransactionId  String          @unique
   bankTransaction    BankTransaction @relation(fields: [bankTransactionId], references: [id], onDelete: Cascade)
   openingBalance     Float?
@@ -257,6 +360,8 @@ model BankTransactionMeta {
 
 model BankAccountCredential {
   id               String       @id @default(uuid())
+  userId           String
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   bankAccountId    String       @unique
   bankAccount      BankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
   label            String?
@@ -267,15 +372,21 @@ model BankAccountCredential {
 
 model MerchantCategoryRule {
   id          String   @id @default(uuid())
-  merchantKey String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchantKey String
   category    String
   source      String   @default("provider")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@unique([userId, merchantKey])
 }
 
 model ChatSession {
   id        String        @id @default(uuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
   createdAt DateTime      @default(now())
   messages  ChatMessage[]
@@ -283,6 +394,8 @@ model ChatSession {
 
 model CardCredential {
   id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   cardId           String   @unique
   card             Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
   label            String?
