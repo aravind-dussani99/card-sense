@@ -13,6 +13,8 @@ export const metadata: Metadata = {
     description: "Track all balances, receivables, and payables.",
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function BalancesPage() {
     const cards: Card[] = await getCards();
     const categories: Category[] = await getCategories();

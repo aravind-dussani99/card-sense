@@ -9,6 +9,8 @@ export const metadata: Metadata = {
     description: "Manage your account settings.",
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function SettingsPage() {
     const connections = await getBankConnections();
 

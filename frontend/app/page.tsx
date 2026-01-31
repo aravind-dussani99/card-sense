@@ -17,6 +17,8 @@ export const metadata: Metadata = {
   description: "Track your credit cards and spending.",
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage() {
   const cards: CardModel[] = await getCards();
   const bankAccounts: BankAccount[] = await getBankAccounts();
@@ -26,7 +28,9 @@ export default async function DashboardPage() {
   const isOverdraft = (account: BankAccount) => {
     const type = (account.type || "").toLowerCase();
     const name = (account.name || "").toLowerCase();
-    return type.includes("overdraft") || name.includes("overdraft");
+    const isCard = type.includes("card") || type.includes("credit");
+    if (isCard) return false;
+    return type.includes("overdraft") || name.includes("overdraft") || (account.limit ?? 0) > 0;
   };
   const overdraftAccounts = bankAccounts.filter(isOverdraft);
   const cardAccounts = bankAccounts.filter((account) => {

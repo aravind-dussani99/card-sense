@@ -9,6 +9,8 @@ export const metadata: Metadata = {
     description: "Analyze your spending habits.",
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function AnalyticsPage() {
     const categoryData = await getSpendingByCategory();
     const monthlyData = await getMonthlySpending();

@@ -76,6 +76,7 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                 {list.map((acct) => {
                     const balanceValue = acct.availableBalance ?? acct.balance ?? null;
                     const balanceText = balanceValue === null ? "—" : balanceValue.toFixed(2);
+                    const limitValue = typeof acct.limit === "number" ? acct.limit : null;
                     const label = acct.name || acct.type || "Account";
                     const bankLabel = getBankLabel(acct);
                     const derived = !acct.accountNumber && !acct.sortCode && acct.mask ? deriveUkAccountDetails(acct.mask) : null;
@@ -87,14 +88,22 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                             : sortCode;
                     const typeValue = (acct.type || "").toLowerCase();
                     const isCard = typeValue.includes("card") || typeValue.includes("credit");
-                    const isOverdraft = typeValue.includes("overdraft");
+                    const isOverdraft = !isCard && (typeValue.includes("overdraft") || (acct.limit ?? 0) > 0);
+                    const overdraftUsed =
+                        isOverdraft && limitValue !== null
+                            ? Math.max(0, limitValue - (typeof acct.availableBalance === "number" ? acct.availableBalance : limitValue))
+                            : null;
+                    const overdraftRemaining =
+                        isOverdraft && limitValue !== null
+                            ? Math.max(0, limitValue - (overdraftUsed ?? 0))
+                            : null;
                     const cardMask = acct.mask || accountNumber.slice(-4) || "••••";
                     const accountRef = isCard
                         ? `Card •••• ${cardMask}`
                         : accountNumber
                             ? `${formattedSortCode ? `Sort ${formattedSortCode} · ` : ""}Acc ${accountNumber}`
                             : acct.mask || acct.providerAccountId || "••••";
-                    const typeLabel = isOverdraft ? "Overdraft" : isCard ? "Card" : "Account";
+                    const typeLabel = isOverdraft ? "Overdraft account" : isCard ? "Credit card" : "Bank account";
                     const statementBalance = typeof acct.statementBalance === "number" ? acct.statementBalance : null;
                     const statementPaid =
                         typeof acct.statementPaidComputed === "number"
@@ -116,7 +125,22 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                                     {bankLabel}
                                 </span>
                             </div>
-                            <div className="text-base font-semibold">{label}</div>
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="text-base font-semibold">{label}</div>
+                                <div className="flex gap-2">
+                                    <ViewAccountDialog account={acct} triggerVariant="icon" />
+                                    <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-8 w-8 rounded-full text-red-600 border-red-200 hover:bg-red-50"
+                                        disabled={loadingId === acct.id}
+                                        onClick={() => deleteAccount(acct.id, label)}
+                                        aria-label="Delete account"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </div>
                             <div className="text-xs text-muted-foreground break-all">
                                 {acct.currency || "—"} · {accountRef}
                                 <span className="ml-2 text-[11px] uppercase tracking-wide text-slate-400">
@@ -124,11 +148,19 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                                 </span>
                             </div>
                             <div className="text-sm font-semibold">
-                                Balance: {balanceText}
+                                {isCard ? "Available credit" : isOverdraft ? "Overdraft available" : "Available balance"}: {balanceText}
                             </div>
-                            {acct.limit !== null && acct.limit !== undefined && (
-                                <div className="text-xs text-muted-foreground">
-                                    Limit: {acct.limit.toFixed(2)}
+                            {limitValue !== null && (
+                                <div className="text-xs text-muted-foreground space-y-1">
+                                    {isOverdraft ? (
+                                        <>
+                                            <div>Overdraft limit: {limitValue.toFixed(2)}</div>
+                                            <div>Used: {overdraftUsed === null ? "—" : overdraftUsed.toFixed(2)}</div>
+                                            <div>Remaining: {overdraftRemaining === null ? "—" : overdraftRemaining.toFixed(2)}</div>
+                                        </>
+                                    ) : (
+                                        <div>{isCard ? "Credit limit" : "Limit"}: {limitValue.toFixed(2)}</div>
+                                    )}
                                 </div>
                             )}
                             {isCard && (
@@ -146,19 +178,6 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                                     </div>
                                 </div>
                             )}
-                            <div className="mt-1 flex gap-2">
-                                <ViewAccountDialog account={acct} triggerVariant="icon" />
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    className="h-9 w-9 rounded-full text-red-600 border-red-200 hover:bg-red-50"
-                                    disabled={loadingId === acct.id}
-                                    onClick={() => deleteAccount(acct.id, label)}
-                                    aria-label="Delete account"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </Button>
-                            </div>
                         </div>
                     );
                 })}

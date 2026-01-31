@@ -25,7 +25,9 @@ const toNumber = (value?: number | null) => (typeof value === "number" ? value :
 const isOverdraft = (account: BankAccount) => {
     const type = (account.type || "").toLowerCase();
     const name = (account.name || "").toLowerCase();
-    return type.includes("overdraft") || name.includes("overdraft");
+    const isCard = type.includes("card") || type.includes("credit");
+    if (isCard) return false;
+    return type.includes("overdraft") || name.includes("overdraft") || (account.limit ?? 0) > 0;
 };
 
 const getSectionFromHash = (): VisibleSection => {

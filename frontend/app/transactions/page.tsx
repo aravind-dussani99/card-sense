@@ -12,6 +12,8 @@ export const metadata: Metadata = {
     description: "View and manage all your transactions.",
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function TransactionsPage() {
     const [cards, categories, accounts] = await Promise.all([
         getCards(),

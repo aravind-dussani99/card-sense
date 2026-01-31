@@ -11,6 +11,8 @@ export const metadata: Metadata = {
     description: "Manage reference data including card types, banks, categories, and sub-categories.",
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function ReferenceDataPage() {
     const [cardTypes, banks, categories] = await Promise.all([
         getCardTypes(),
