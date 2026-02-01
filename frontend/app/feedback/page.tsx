@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +22,7 @@ export default function FeedbackPage() {
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     const load = async () => {
@@ -34,6 +36,13 @@ export default function FeedbackPage() {
     };
     void load();
   }, []);
+
+  useEffect(() => {
+    const prefill = searchParams.get("prefill");
+    if (prefill && !message) {
+      setMessage(prefill);
+    }
+  }, [message, searchParams]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();

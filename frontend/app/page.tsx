@@ -25,33 +25,33 @@ export default async function DashboardPage() {
   const recentTransactions: BankTransaction[] = await getBankTransactions(10);
 
   const toNumber = (value?: number | null) => (typeof value === "number" ? value : 0);
-  const isOverdraft = (account: BankAccount) => {
-    const type = (account.type || "").toLowerCase();
-    const name = (account.name || "").toLowerCase();
+  const overdraftAccounts = bankAccounts.filter((acct) => {
+    const type = (acct.type || "").toLowerCase();
     const isCard = type.includes("card") || type.includes("credit");
-    if (isCard) return false;
-    return type.includes("overdraft") || name.includes("overdraft") || (account.limit ?? 0) > 0;
-  };
-  const overdraftAccounts = bankAccounts.filter(isOverdraft);
+    return !isCard && (acct.limit ?? 0) > 0;
+  });
   const cardAccounts = bankAccounts.filter((account) => {
     const type = (account.type || "").toLowerCase();
     return type.includes("card") || type.includes("credit");
   });
   const standardAccounts = bankAccounts.filter((account) => {
     const type = (account.type || "").toLowerCase();
-    return !isOverdraft(account) && !type.includes("card") && !type.includes("credit");
+    return !type.includes("card") && !type.includes("credit");
   });
 
-  const bankAvailable = standardAccounts.reduce(
-    (sum, acct) => sum + toNumber(acct.availableBalance ?? acct.balance),
-    0
-  );
+  const bankAvailable = standardAccounts.reduce((sum, acct) => {
+    const limit = typeof acct.limit === "number" ? acct.limit : 0;
+    const available = typeof acct.availableBalance === "number" ? acct.availableBalance : null;
+    const balance = typeof acct.balance === "number" ? acct.balance : null;
+    const base = available !== null && limit > 0 ? available - limit : balance ?? available ?? 0;
+    return sum + Math.max(0, base);
+  }, 0);
   const overdraftLimit = overdraftAccounts.reduce((sum, acct) => sum + toNumber(acct.limit), 0);
-  const overdraftAvailable = overdraftAccounts.reduce(
-    (sum, acct) => sum + toNumber(acct.availableBalance ?? acct.balance),
-    0
-  );
-  const overdraftUsed = Math.max(0, overdraftLimit - overdraftAvailable);
+  const overdraftUsed = overdraftAccounts.reduce((sum, acct) => {
+    const balance = typeof acct.balance === "number" ? acct.balance : 0;
+    return sum + Math.max(0, -balance);
+  }, 0);
+  const overdraftAvailable = Math.max(0, overdraftLimit - overdraftUsed);
 
   const cardAccountLimit = cardAccounts.reduce((sum, acct) => sum + toNumber(acct.limit), 0);
   const cardAccountUsed = cardAccounts.reduce((sum, acct) => {
@@ -68,12 +68,15 @@ export default async function DashboardPage() {
   const creditAvailable = Math.max(0, creditLimit - creditUsed);
 
   const grossAvailable = bankAvailable + overdraftAvailable + creditAvailable;
-  const bankNegative = standardAccounts.reduce(
-    (sum, acct) => sum + Math.max(0, -(acct.balance ?? 0)),
-    0
-  );
+  const bankNegative = standardAccounts.reduce((sum, acct) => {
+    const limit = typeof acct.limit === "number" ? acct.limit : 0;
+    const available = typeof acct.availableBalance === "number" ? acct.availableBalance : null;
+    const balance = typeof acct.balance === "number" ? acct.balance : null;
+    const base = available !== null && limit > 0 ? available - limit : balance ?? available ?? 0;
+    return sum + Math.max(0, -base);
+  }, 0);
   const grossPayable = bankNegative + overdraftUsed + creditUsed;
-  const netAvailable = bankAvailable + overdraftAvailable - creditUsed;
+  const netAvailable = grossAvailable - grossPayable;
 
   return (
     <div className="flex flex-col min-h-screen">

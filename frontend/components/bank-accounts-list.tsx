@@ -31,7 +31,13 @@ type BankAccountDisplay = {
     limit?: number | null;
 };
 
-export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDisplay[] }) {
+export function BankAccountsList({
+    bankAccounts,
+    context = "bank",
+}: {
+    bankAccounts: BankAccountDisplay[];
+    context?: "bank" | "overdraft" | "card";
+}) {
     const [list, setList] = useState(bankAccounts);
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -74,8 +80,6 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
             )}
             <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
                 {list.map((acct) => {
-                    const balanceValue = acct.availableBalance ?? acct.balance ?? null;
-                    const balanceText = balanceValue === null ? "—" : balanceValue.toFixed(2);
                     const limitValue = typeof acct.limit === "number" ? acct.limit : null;
                     const label = acct.name || acct.type || "Account";
                     const bankLabel = getBankLabel(acct);
@@ -87,8 +91,13 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                             ? `${sortCode.slice(0, 2)}-${sortCode.slice(2, 4)}-${sortCode.slice(4)}`
                             : sortCode;
                     const typeValue = (acct.type || "").toLowerCase();
-                    const isCard = typeValue.includes("card") || typeValue.includes("credit");
-                    const isOverdraft = !isCard && (typeValue.includes("overdraft") || (acct.limit ?? 0) > 0);
+                    const isCard = context === "card" ? true : context === "bank" ? false : typeValue.includes("card") || typeValue.includes("credit");
+                    const isOverdraft =
+                        context === "overdraft"
+                            ? true
+                            : context === "bank"
+                                ? false
+                                : !isCard && (typeValue.includes("overdraft") || (acct.limit ?? 0) > 0);
                     const overdraftUsed =
                         isOverdraft && limitValue !== null
                             ? Math.max(0, limitValue - (typeof acct.availableBalance === "number" ? acct.availableBalance : limitValue))
@@ -97,13 +106,33 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                         isOverdraft && limitValue !== null
                             ? Math.max(0, limitValue - (overdraftUsed ?? 0))
                             : null;
+                    let bankBaseBalance: number | null = null;
+                    if (context === "bank") {
+                        if (typeof acct.availableBalance === "number" && limitValue !== null && limitValue > 0) {
+                            bankBaseBalance = acct.availableBalance - limitValue;
+                        } else if (typeof acct.balance === "number") {
+                            bankBaseBalance = acct.balance;
+                        } else if (typeof acct.availableBalance === "number") {
+                            bankBaseBalance = acct.availableBalance;
+                        }
+                    }
+                    const balanceValue =
+                        isOverdraft && limitValue !== null
+                            ? overdraftRemaining
+                            : bankBaseBalance ?? acct.availableBalance ?? acct.balance ?? null;
+                    const balanceText = balanceValue === null ? "—" : balanceValue.toFixed(2);
                     const cardMask = acct.mask || accountNumber.slice(-4) || "••••";
                     const accountRef = isCard
                         ? `Card •••• ${cardMask}`
                         : accountNumber
                             ? `${formattedSortCode ? `Sort ${formattedSortCode} · ` : ""}Acc ${accountNumber}`
                             : acct.mask || acct.providerAccountId || "••••";
-                    const typeLabel = isOverdraft ? "Overdraft account" : isCard ? "Credit card" : "Bank account";
+                    const typeLabel =
+                        context === "overdraft"
+                            ? "Overdraft account"
+                            : context === "card"
+                                ? "Credit card"
+                                : "Bank account";
                     const statementBalance = typeof acct.statementBalance === "number" ? acct.statementBalance : null;
                     const statementPaid =
                         typeof acct.statementPaidComputed === "number"
@@ -143,23 +172,38 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                             </div>
                             <div className="text-xs text-muted-foreground break-all">
                                 {acct.currency || "—"} · {accountRef}
-                                <span className="ml-2 text-[11px] uppercase tracking-wide text-slate-400">
+                                <span className="ml-2 text-[11px] uppercase tracking-wide font-semibold text-slate-500">
                                     {typeLabel}
                                 </span>
                             </div>
                             <div className="text-sm font-semibold">
-                                {isCard ? "Available credit" : isOverdraft ? "Overdraft available" : "Available balance"}: {balanceText}
+                                {isCard
+                                    ? "Available credit"
+                                    : isOverdraft
+                                        ? "Overdraft available"
+                                        : "Available balance"}: {balanceText}
                             </div>
-                            {limitValue !== null && (
+                            {limitValue !== null && context !== "bank" && (
                                 <div className="text-xs text-muted-foreground space-y-1">
                                     {isOverdraft ? (
-                                        <>
-                                            <div>Overdraft limit: {limitValue.toFixed(2)}</div>
-                                            <div>Used: {overdraftUsed === null ? "—" : overdraftUsed.toFixed(2)}</div>
-                                            <div>Remaining: {overdraftRemaining === null ? "—" : overdraftRemaining.toFixed(2)}</div>
-                                        </>
+                                        <div className="flex flex-wrap gap-2">
+                                            <span>Limit: {limitValue.toFixed(2)}</span>
+                                            <span>Used: {overdraftUsed === null ? "—" : overdraftUsed.toFixed(2)}</span>
+                                        </div>
                                     ) : (
-                                        <div>{isCard ? "Credit limit" : "Limit"}: {limitValue.toFixed(2)}</div>
+                                        <>
+                                            <div className="flex flex-wrap gap-2">
+                                                <span>{isCard ? "Credit limit" : "Limit"}: {limitValue.toFixed(2)}</span>
+                                                {isCard && (
+                                                    <span>
+                                                        Used:{" "}
+                                                        {typeof acct.availableBalance === "number"
+                                                            ? Math.max(0, limitValue - acct.availableBalance).toFixed(2)
+                                                            : "—"}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </>
                                     )}
                                 </div>
                             )}
@@ -168,13 +212,15 @@ export function BankAccountsList({ bankAccounts }: { bankAccounts: BankAccountDi
                                     <div className="flex flex-wrap gap-2">
                                         <span>Statement: {statementBalance === null ? "—" : statementBalance.toFixed(2)}</span>
                                         <span>Paid: {statementPaid === null ? "—" : statementPaid.toFixed(2)}</span>
-                                        <span>Payable: {statementPayable === null ? "—" : statementPayable.toFixed(2)}</span>
                                     </div>
-                                    <div>
-                                        Due in:{" "}
-                                        {acct.statementDueInDays !== null && acct.statementDueInDays !== undefined
-                                            ? `${acct.statementDueInDays} days`
-                                            : "—"}
+                                    <div className="flex flex-wrap gap-2">
+                                        <span>Payable: {statementPayable === null ? "—" : statementPayable.toFixed(2)}</span>
+                                        <span>
+                                            Due in:{" "}
+                                            {acct.statementDueInDays !== null && acct.statementDueInDays !== undefined
+                                                ? `${acct.statementDueInDays} days`
+                                                : "—"}
+                                        </span>
                                     </div>
                                 </div>
                             )}

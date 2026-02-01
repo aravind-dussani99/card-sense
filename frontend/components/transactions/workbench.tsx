@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { RefreshCw, AlertCircle, CheckCircle2, Eye, Pencil, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { RefreshCw, AlertCircle, CheckCircle2, Eye, Pencil, Trash2, Copy, MessageSquare, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -66,6 +67,39 @@ type DraftRecord = {
         comments?: string | null;
         attachmentsJson?: string | null;
     } | null;
+};
+
+const DateInput = ({
+    id,
+    value,
+    onChange,
+}: {
+    id?: string;
+    value: string;
+    onChange: (value: string) => void;
+}) => {
+    const inputRef = useRef<HTMLInputElement | null>(null);
+    const buttonOffset = id?.includes("dialog") ? "right-3" : "right-2";
+    return (
+        <div className="relative">
+            <Input
+                ref={inputRef}
+                id={id}
+                type="date"
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className="pr-12 min-w-[140px] tabular-nums appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:hidden"
+            />
+            <button
+                type="button"
+                className={`absolute ${buttonOffset} top-1/2 -translate-y-1/2 text-muted-foreground hover:text-slate-900`}
+                onClick={() => inputRef.current?.showPicker?.()}
+                aria-label="Open calendar"
+            >
+                <Calendar className="h-4 w-4" />
+            </button>
+        </div>
+    );
 };
 
 type Meta = {
@@ -163,6 +197,14 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
     const [filterToDate, setFilterToDate] = useState<string>(monthToDate.to);
     const [showSync, setShowSync] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
+    const [syncReportOpen, setSyncReportOpen] = useState(false);
+    const [syncReport, setSyncReport] = useState<{
+        status: "idle" | "loading" | "success" | "error";
+        message: string;
+        fromDate?: string;
+        toDate?: string;
+        sources?: string;
+    }>({ status: "idle", message: "" });
 
     useEffect(() => {
         if (syncMode !== "custom") {
@@ -298,11 +340,26 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         throw new Error(fallback || "Server returned an unexpected response");
     };
 
+    const categoryOptions = useMemo(() => {
+        if (categories.length) return categories;
+        const seen = new Set<string>();
+        return drafts
+            .map((draft) => draft.category)
+            .filter((name): name is string => Boolean(name))
+            .filter((name) => {
+                const key = name.toLowerCase();
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            })
+            .map((name) => ({ id: `fallback:${name}`, name, subCategories: [] }));
+    }, [categories, drafts]);
+
     const categoryLookup = useMemo(() => {
         const map = new Map<string, { id: string; name: string; subCategories: Array<{ id: string; name: string; categoryId: string }> }>();
-        categories.forEach((category) => map.set(category.id, category));
+        categoryOptions.forEach((category) => map.set(category.id, category));
         return map;
-    }, [categories]);
+    }, [categoryOptions]);
 
     const availableEditSubCategories = useMemo(() => {
         if (!editForm.categoryId) return [];
@@ -368,7 +425,9 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
 
     useEffect(() => {
         void fetchDrafts(1, PAGE_SIZE);
-    }, [fetchDrafts]);
+        // fetchDrafts uses latest state, but we only want initial load here.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const applyFilters = () => {
         void fetchDrafts(1, PAGE_SIZE);
@@ -400,6 +459,18 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         }
         setSyncLoading(true);
         setFeedback(null);
+        const sourceLabel =
+            syncMode === "custom"
+                ? `${selectedSources.length} source${selectedSources.length === 1 ? "" : "s"}`
+                : "All sources";
+        setSyncReport({
+            status: "loading",
+            message: "Syncing transactions...",
+            fromDate: fromDate || "—",
+            toDate: toDate || "—",
+            sources: sourceLabel,
+        });
+        setSyncReportOpen(true);
         try {
             let accountId: string | undefined;
             if (syncMode === "custom" && selectedSources.length === 1) {
@@ -427,9 +498,23 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                 type: "success",
                 message: `Synced ${result.synced ?? 0} connection${result.synced === 1 ? "" : "s"}.`,
             });
+            setSyncReport({
+                status: "success",
+                message: `Synced ${result.synced ?? 0} connection${result.synced === 1 ? "" : "s"} successfully.`,
+                fromDate: fromDate || "—",
+                toDate: toDate || "—",
+                sources: sourceLabel,
+            });
             await fetchDrafts(1);
         } catch (error: unknown) {
             setFeedback({ type: "error", message: getErrorMessage(error) || "Sync failed" });
+            setSyncReport({
+                status: "error",
+                message: getErrorMessage(error) || "Sync failed",
+                fromDate: fromDate || "—",
+                toDate: toDate || "—",
+                sources: sourceLabel,
+            });
         } finally {
             setSyncLoading(false);
         }
@@ -480,13 +565,20 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         setDialog({ mode, draft });
         setFeedback(null);
         if (mode === "edit" && draft) {
-            const matchedCategory = categories.find((c) => c.name === draft.category);
+            const categoryName = draft.category || "";
+            const matchedCategory = categoryOptions.find(
+                (c) => c.name.toLowerCase() === categoryName.toLowerCase()
+            );
+            const matchedSubCategory =
+                matchedCategory?.subCategories.find(
+                    (sub) => sub.name.toLowerCase() === (draft.subCategory || "").toLowerCase()
+                ) || null;
             setEditForm({
                 merchantName: draft.merchantTo || "",
                 amount: draft.amount?.toString() || "",
-                category: matchedCategory?.name || "",
-                categoryId: matchedCategory?.id || "",
-                subCategory: draft.subCategory || "",
+                category: matchedCategory?.name || categoryName,
+                categoryId: matchedCategory?.id || (categoryName ? "__unmatched__" : ""),
+                subCategory: matchedSubCategory?.name || draft.subCategory || "",
                 headAccount: draft.headAccount || "",
                 openingBalance: draft.openingBalance !== null && draft.openingBalance !== undefined ? String(draft.openingBalance) : "",
                 closingBalance: draft.closingBalance !== null && draft.closingBalance !== undefined ? String(draft.closingBalance) : "",
@@ -697,6 +789,12 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         };
     }, []);
 
+    const syncReportText = `Sync status: ${syncReport.status}
+Sources: ${syncReport.sources ?? "—"}
+From: ${syncReport.fromDate ?? "—"}
+To: ${syncReport.toDate ?? "—"}
+Message: ${syncReport.message}`;
+
     return (
         <div className="space-y-6">
             {showInlinePanels && (
@@ -792,12 +890,12 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                     </Popover>
                                 </div>
                                 <div className="space-y-1">
-                                    <Label htmlFor="fromDate">From date</Label>
-                                    <Input id="fromDate" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+                            <Label htmlFor="fromDate">From date</Label>
+                            <DateInput id="fromDate" value={fromDate} onChange={setFromDate} />
                                 </div>
                                 <div className="space-y-1">
-                                    <Label htmlFor="toDate">To date</Label>
-                                    <Input id="toDate" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+                            <Label htmlFor="toDate">To date</Label>
+                            <DateInput id="toDate" value={toDate} onChange={setToDate} />
                                 </div>
                                 <div className="flex items-end gap-2">
                                     <Button onClick={handleSync} disabled={syncLoading} className="whitespace-nowrap">
@@ -856,8 +954,8 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                             <div className="space-y-1.5">
                                 <Label>Date range</Label>
                                 <div className="grid grid-cols-2 gap-2">
-                                    <Input type="date" value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} />
-                                    <Input type="date" value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} />
+                                    <DateInput value={filterFromDate} onChange={setFilterFromDate} />
+                                    <DateInput value={filterToDate} onChange={setFilterToDate} />
                                 </div>
                             </div>
                             <div className="space-y-1.5">
@@ -891,8 +989,8 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="all">All</SelectItem>
-                                        {categories.map((category) => (
-                                            <SelectItem key={category.id} value={category.name}>
+                                        {categoryOptions.map((category) => (
+                                            <SelectItem key={category.id} value={category.id}>
                                                 {category.name}
                                             </SelectItem>
                                         ))}
@@ -923,11 +1021,15 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                 + Add Cash Transaction
                             </Button>
                         </div>
-                        <div className="flex flex-wrap items-center justify-end gap-2">
+                        <div className="flex flex-nowrap items-center justify-end gap-2">
+                            <span className="text-sm text-muted-foreground whitespace-nowrap">
+                                Showing {drafts.length} item{drafts.length === 1 ? "" : "s"} (total {meta.total})
+                            </span>
                             <Button
                                 variant="outline"
                                 size="sm"
                                 disabled={meta.page === 1 || pageLoading}
+                                className="flex-shrink-0"
                                 onClick={() => fetchDrafts(meta.page - 1)}
                             >
                                 Previous
@@ -939,13 +1041,11 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                 variant="outline"
                                 size="sm"
                                 disabled={meta.page >= totalPages || pageLoading}
+                                className="flex-shrink-0"
                                 onClick={() => fetchDrafts(meta.page + 1)}
                             >
                                 Next
                             </Button>
-                            <span className="ml-2 text-sm text-muted-foreground">
-                                Showing {drafts.length} item{drafts.length === 1 ? "" : "s"} (total {meta.total})
-                            </span>
                         </div>
                     </div>
                 </CardHeader>
@@ -1058,14 +1158,18 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             </Card>
 
             <Dialog open={syncDialogOpen} onOpenChange={setSyncDialogOpen}>
-                <DialogContent className="sm:max-w-4xl">
+                <DialogContent className="sm:max-w-4xl overflow-visible">
                     <DialogHeader>
                         <DialogTitle>Sync transactions</DialogTitle>
                         <DialogDescription className="text-xs">
                             Choose sources + dates, then sync the latest data.
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-[1fr_1.6fr_1fr_1fr]">
+                    <div
+                        className={`grid gap-3 md:grid-cols-2 ${
+                            syncMode === "custom" ? "lg:grid-cols-[1fr_1.6fr_1fr_1fr]" : "lg:grid-cols-3"
+                        }`}
+                    >
                         <div className="space-y-1">
                             <Label>Source scope</Label>
                             <Select value={syncMode} onValueChange={(value) => isValidMode(value) && setSyncMode(value)}>
@@ -1081,73 +1185,71 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="space-y-1">
-                            <Label>Custom selection</Label>
-                            <Popover open={sourcePickerOpen} onOpenChange={(open) => syncMode === "custom" && setSourcePickerOpen(open)}>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        variant="outline"
-                                        disabled={syncMode !== "custom"}
-                                        className="w-full justify-between"
-                                    >
-                                        {selectedSources.length === 0
-                                            ? "Pick specific accounts or cards"
-                                            : `${selectedSources.length} source${selectedSources.length === 1 ? "" : "s"} selected`}
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent align="start" className="w-[320px] space-y-3">
-                                    <div className="text-sm font-medium">Select accounts or cards</div>
-                                    <div className="max-h-60 space-y-2 overflow-y-auto pr-2">
-                                        {allSources.map((source) => {
-                                            const value = `${source.type}:${source.id}`;
-                                            const checked = selectedSources.includes(value);
-                                            return (
-                                                <label
-                                                    key={value}
-                                                    className="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
-                                                >
-                                                    <input
-                                                        type="checkbox"
-                                                        className="mt-1 h-4 w-4 rounded border-slate-300"
-                                                        checked={checked}
-                                                        onChange={() => {
-                                                            setSelectedSources((prev) =>
-                                                                checked ? prev.filter((item) => item !== value) : [...prev, value]
-                                                            );
-                                                        }}
-                                                    />
-                                                    <span className="flex flex-col">
-                                                        <span className="font-medium">{source.label}</span>
-                                                        <span className="text-xs text-muted-foreground capitalize">
-                                                            {source.type}
-                                                            {source.helper ? ` • ${source.helper}` : ""}
+                        {syncMode === "custom" && (
+                            <div className="space-y-1">
+                                <Label>Custom selection</Label>
+                                <Popover open={sourcePickerOpen} onOpenChange={(open) => setSourcePickerOpen(open)}>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" className="w-full justify-between">
+                                            {selectedSources.length === 0
+                                                ? "Pick specific accounts or cards"
+                                                : `${selectedSources.length} source${selectedSources.length === 1 ? "" : "s"} selected`}
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent align="start" sideOffset={8} className="w-[320px] space-y-3 z-[80] bg-white shadow-lg">
+                                        <div className="text-sm font-medium">Select accounts or cards</div>
+                                        <div className="max-h-60 space-y-2 overflow-y-auto pr-2">
+                                            {allSources.map((source) => {
+                                                const value = `${source.type}:${source.id}`;
+                                                const checked = selectedSources.includes(value);
+                                                return (
+                                                    <label
+                                                        key={value}
+                                                        className="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            className="mt-1 h-4 w-4 rounded border-slate-300"
+                                                            checked={checked}
+                                                            onChange={() => {
+                                                                setSelectedSources((prev) =>
+                                                                    checked ? prev.filter((item) => item !== value) : [...prev, value]
+                                                                );
+                                                            }}
+                                                        />
+                                                        <span className="flex flex-col">
+                                                            <span className="font-medium">{source.label}</span>
+                                                            <span className="text-xs text-muted-foreground capitalize">
+                                                                {source.type}
+                                                                {source.helper ? ` • ${source.helper}` : ""}
+                                                            </span>
                                                         </span>
-                                                    </span>
-                                                </label>
-                                            );
-                                        })}
-                                        {allSources.length === 0 && (
-                                            <p className="text-sm text-muted-foreground">No sources connected yet.</p>
-                                        )}
-                                    </div>
-                                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                        <Button type="button" size="sm" variant="outline" onClick={() => setSelectedSources([])}>
-                                            Clear selection
-                                        </Button>
-                                        <Button type="button" size="sm" onClick={() => setSourcePickerOpen(false)}>
-                                            Done
-                                        </Button>
-                                    </div>
-                                </PopoverContent>
-                            </Popover>
-                        </div>
+                                                    </label>
+                                                );
+                                            })}
+                                            {allSources.length === 0 && (
+                                                <p className="text-sm text-muted-foreground">No sources connected yet.</p>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                            <Button type="button" size="sm" variant="outline" onClick={() => setSelectedSources([])}>
+                                                Clear selection
+                                            </Button>
+                                            <Button type="button" size="sm" onClick={() => setSourcePickerOpen(false)}>
+                                                Done
+                                            </Button>
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+                        )}
                         <div className="space-y-1">
                             <Label htmlFor="dialogFromDate">From date</Label>
-                            <Input id="dialogFromDate" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+                            <DateInput id="dialogFromDate" value={fromDate} onChange={setFromDate} />
                         </div>
                         <div className="space-y-1">
                             <Label htmlFor="dialogToDate">To date</Label>
-                            <Input id="dialogToDate" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+                            <DateInput id="dialogToDate" value={toDate} onChange={setToDate} />
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -1165,6 +1267,68 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                             Reset
                         </Button>
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={syncReportOpen} onOpenChange={setSyncReportOpen}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            {syncReport.status === "loading" && <RefreshCw className="h-4 w-4 animate-spin" />}
+                            {syncReport.status === "success" && <CheckCircle2 className="h-4 w-4 text-green-600" />}
+                            {syncReport.status === "error" && <AlertCircle className="h-4 w-4 text-red-600" />}
+                            Sync status
+                        </DialogTitle>
+                        <DialogDescription className="text-xs">
+                            {syncReport.status === "loading" ? "Sync in progress." : "Sync complete. Review the details below."}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 text-sm">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 whitespace-pre-line">
+                            {syncReportText}
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2 text-xs text-muted-foreground">
+                            <div>
+                                <div className="uppercase tracking-wide text-slate-500">Sources</div>
+                                <div className="font-medium text-slate-800">{syncReport.sources ?? "—"}</div>
+                            </div>
+                            <div>
+                                <div className="uppercase tracking-wide text-slate-500">Date range</div>
+                                <div className="font-medium text-slate-800">
+                                    {syncReport.fromDate ?? "—"} → {syncReport.toDate ?? "—"}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter className="sm:justify-between">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(syncReportText);
+                                        setFeedback({ type: "success", message: "Sync report copied to clipboard." });
+                                    } catch {
+                                        setFeedback({ type: "error", message: "Failed to copy report." });
+                                    }
+                                }}
+                            >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy report
+                            </Button>
+                            <Link href={`/feedback?prefill=${encodeURIComponent(syncReportText)}`} className="inline-flex">
+                                <Button type="button" variant="outline" size="sm">
+                                    <MessageSquare className="mr-2 h-4 w-4" />
+                                    Report issue
+                                </Button>
+                            </Link>
+                        </div>
+                        <Button type="button" onClick={() => setSyncReportOpen(false)}>
+                            Close
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
@@ -1199,8 +1363,8 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                         <div className="space-y-1.5">
                             <Label>Date range</Label>
                             <div className="grid grid-cols-2 gap-2">
-                                <Input type="date" value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} />
-                                <Input type="date" value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} />
+                                <DateInput value={filterFromDate} onChange={setFilterFromDate} />
+                                <DateInput value={filterToDate} onChange={setFilterToDate} />
                             </div>
                         </div>
                         <div className="space-y-1.5">
@@ -1228,8 +1392,8 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All</SelectItem>
-                                    {categories.map((category) => (
-                                        <SelectItem key={category.id} value={category.name}>
+                                    {categoryOptions.map((category) => (
+                                        <SelectItem key={category.id} value={category.id}>
                                             {category.name}
                                         </SelectItem>
                                     ))}
@@ -1397,7 +1561,12 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="none">Unassigned</SelectItem>
-                                            {categories.map((category) => (
+                                            {editForm.categoryId === "__unmatched__" && (
+                                                <SelectItem value="__unmatched__">
+                                                    {editForm.category || "Unassigned"}
+                                                </SelectItem>
+                                            )}
+                                            {categoryOptions.map((category) => (
                                                 <SelectItem key={category.id} value={category.id}>
                                                     {category.name}
                                                 </SelectItem>

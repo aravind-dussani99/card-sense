@@ -6,7 +6,7 @@ COPY package*.json ./
 RUN npm ci
 
 COPY prisma ./prisma
-RUN npx prisma generate
+RUN npx prisma generate --schema prisma/schema.postgres.prisma
 
 COPY . .
 
