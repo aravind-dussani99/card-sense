@@ -57,6 +57,11 @@ export type CardType = {
   color?: string | null;
 };
 
+export type HeadAccount = {
+  id: string;
+  name: string;
+};
+
 export type Card = {
   id: string;
   name: string;

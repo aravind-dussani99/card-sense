@@ -64,6 +64,28 @@ export async function seedDefaultData() {
       },
     ];
 
+    const defaultHeadAccounts = [
+      "Personal",
+      "Business",
+      "Logistics",
+      "Agriculture",
+      "Household",
+      "Savings",
+      "Investments",
+      "Loans In",
+      "Loans Out",
+      "Insurance",
+      "Subscriptions",
+    ];
+
+    for (const name of defaultHeadAccounts) {
+      await prisma.headAccount.upsert({
+        where: { userId_name: { userId: null, name } },
+        update: {},
+        create: { userId: null, name },
+      });
+    }
+
     for (const category of mustHaveCategories) {
       const savedCategory = await prisma.category.upsert({
         where: { userId_name: { userId: null, name: category.name } },

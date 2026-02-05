@@ -129,7 +129,206 @@ const resolveTransactionCategory = async (tx, userId) => {
     });
   }
 
+  await ensureUserCategory(userId, mapped);
   return { category: mapped, source: resolved.source };
+};
+
+const normalizeDateInput = (value, endOfDay = false) => {
+  if (!value || typeof value !== "string") return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    if (endOfDay) {
+      date.setUTCHours(23, 59, 59, 999);
+    } else {
+      date.setUTCHours(0, 0, 0, 0);
+    }
+  }
+  return date;
+};
+
+const normalizeDateRange = (fromDate, toDate) => {
+  const from = normalizeDateInput(fromDate, false);
+  const to = normalizeDateInput(toDate, true);
+  return { from, to };
+};
+
+const ensureUserDefaultCategories = async (userId) => {
+  const defaults = await prisma.category.findMany({
+    where: { userId: null },
+    include: { subCategories: true },
+  });
+  if (!defaults.length) return;
+
+  for (const category of defaults) {
+    const userCategory = await prisma.category.upsert({
+      where: { userId_name: { userId, name: category.name } },
+      update: {},
+      create: {
+        userId,
+        name: category.name,
+        icon: category.icon,
+        color: category.color,
+      },
+    });
+
+    for (const sub of category.subCategories) {
+      const existingSub = await prisma.subCategory.findFirst({
+        where: { categoryId: userCategory.id, name: sub.name },
+        select: { id: true },
+      });
+      if (!existingSub) {
+        await prisma.subCategory.create({
+          data: { categoryId: userCategory.id, name: sub.name },
+        });
+      }
+    }
+  }
+};
+
+const ensureUserDefaultHeadAccounts = async (userId) => {
+  const defaults = await prisma.headAccount.findMany({
+    where: { userId: null },
+  });
+  if (!defaults.length) return;
+  for (const head of defaults) {
+    await prisma.headAccount.upsert({
+      where: { userId_name: { userId, name: head.name } },
+      update: {},
+      create: { userId, name: head.name },
+    });
+  }
+};
+
+const ensureUserCategory = async (userId, name) => {
+  if (!name || typeof name !== "string") return;
+  const existing = await prisma.category.findFirst({
+    where: { userId, name },
+    select: { id: true },
+  });
+  if (existing) return;
+
+  const template = await prisma.category.findFirst({
+    where: { userId: null, name },
+    select: { icon: true, color: true },
+  });
+
+  await prisma.category.create({
+    data: {
+      userId,
+      name,
+      icon: template?.icon || null,
+      color: template?.color || null,
+    },
+  });
+};
+
+const ensureHeadAccount = async (userId, name) => {
+  if (!name || typeof name !== "string") return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const existing = await prisma.headAccount.findFirst({
+    where: { userId, name: trimmed },
+    select: { id: true },
+  });
+  if (existing) return;
+  await prisma.headAccount.create({
+    data: { userId, name: trimmed },
+  });
+};
+
+const parseRawJson = (raw) => {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const getManualRawMeta = (raw) => {
+  const parsed = parseRawJson(raw);
+  if (parsed && parsed.source === "manual") return parsed;
+  return null;
+};
+
+const buildManualRaw = ({ cardId, transactionType, loanTo, loanFrom }) =>
+  JSON.stringify({
+    source: "manual",
+    cardId: cardId || null,
+    transactionType: transactionType || "expense",
+    loanTo: loanTo || null,
+    loanFrom: loanFrom || null,
+  });
+
+const ensureManualConnection = async (userId) => {
+  const existing = await prisma.bankConnection.findFirst({
+    where: { userId, provider: "manual" },
+  });
+  if (existing) return existing;
+  return prisma.bankConnection.create({
+    data: {
+      userId,
+      provider: "manual",
+      providerAccountId: `manual-${userId}`,
+      accessToken: "manual",
+      refreshToken: null,
+      institutionId: null,
+      status: "active",
+    },
+  });
+};
+
+const ensureManualAccount = async (userId, { providerAccountId, name, type, mask }) => {
+  const existing = await prisma.bankAccount.findFirst({
+    where: { userId, providerAccountId },
+  });
+  if (existing) {
+    const updates = {};
+    if (typeof name === "string" && name !== existing.name) updates.name = name;
+    if (typeof type === "string" && type !== existing.type) updates.type = type;
+    if (mask !== undefined && mask !== existing.mask) updates.mask = mask;
+    if (Object.keys(updates).length) {
+      return prisma.bankAccount.update({
+        where: { id: existing.id },
+        data: updates,
+      });
+    }
+    return existing;
+  }
+  const connection = await ensureManualConnection(userId);
+  return prisma.bankAccount.create({
+    data: {
+      userId,
+      connectionId: connection.id,
+      providerAccountId,
+      type: type || "cash",
+      name: name || "Manual",
+      mask: mask || null,
+      status: "active",
+    },
+  });
+};
+
+const resolveManualAccountForTransaction = async (userId, cardId) => {
+  if (cardId) {
+    const card = await prisma.card.findFirst({ where: { id: cardId, userId } });
+    if (!card) return { account: null, card: null };
+    const account = await ensureManualAccount(userId, {
+      providerAccountId: `manual-card-${card.id}`,
+      name: card.name || "Card",
+      type: "card",
+      mask: card.last4 || null,
+    });
+    return { account, card };
+  }
+  const account = await ensureManualAccount(userId, {
+    providerAccountId: "manual-cash",
+    name: "Cash",
+    type: "cash",
+    mask: null,
+  });
+  return { account, card: null };
 };
 app.use((req, res, next) => {
   const allowedOriginRaw = process.env.CORS_ORIGIN || "*";
@@ -272,6 +471,8 @@ app.post("/api/auth/signup", async (req, res) => {
         name: typeof name === "string" && name.trim() ? name.trim() : null,
       },
     });
+    await ensureUserDefaultCategories(user.id);
+    await ensureUserDefaultHeadAccounts(user.id);
     const token = await issueEmailVerification(user);
     res.status(201).json({
       success: true,
@@ -501,7 +702,9 @@ app.get("/api/admin/metrics", async (req, res) => {
       prisma.card.count(),
       prisma.bankAccount.count(),
       prisma.bankTransaction.count(),
-      prisma.transaction.count(),
+      prisma.bankTransaction.count({
+        where: { providerTransactionId: { startsWith: "manual-" } },
+      }),
       prisma.bankConnection.count(),
     ]);
 
@@ -747,10 +950,15 @@ app.delete("/api/card-types/:id", async (req, res) => {
 app.get("/api/categories", async (req, res) => {
   try {
     const userId = req.user.id;
+    const existingUserCategories = await prisma.category.findFirst({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!existingUserCategories) {
+      await ensureUserDefaultCategories(userId);
+    }
     const categories = await prisma.category.findMany({
-      where: {
-        OR: [{ userId }, { userId: null }],
-      },
+      where: { userId },
       orderBy: { name: "asc" },
       include: {
         subCategories: { orderBy: { name: "asc" } },
@@ -760,6 +968,81 @@ app.get("/api/categories", async (req, res) => {
   } catch (error) {
     console.error("Failed to fetch categories:", error);
     res.status(500).json({ error: "Failed to fetch categories" });
+  }
+});
+
+app.get("/api/head-accounts", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const existing = await prisma.headAccount.findFirst({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!existing) {
+      await ensureUserDefaultHeadAccounts(userId);
+    }
+    const headAccounts = await prisma.headAccount.findMany({
+      where: { userId },
+      orderBy: { name: "asc" },
+    });
+    res.json(headAccounts);
+  } catch (error) {
+    console.error("Failed to fetch head accounts:", error);
+    res.status(500).json({ error: "Failed to fetch head accounts" });
+  }
+});
+
+app.post("/api/head-accounts", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name } = req.body || {};
+    if (!name) {
+      res.status(400).json({ error: "name is required" });
+      return;
+    }
+    const headAccount = await prisma.headAccount.create({
+      data: { userId, name: String(name).trim() },
+    });
+    res.status(201).json({ success: true, data: headAccount });
+  } catch (error) {
+    console.error("Failed to create head account:", error);
+    res.status(500).json({ error: "Failed to create head account" });
+  }
+});
+
+app.put("/api/head-accounts/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name } = req.body || {};
+    const updated = await prisma.headAccount.updateMany({
+      where: { id: req.params.id, userId },
+      data: { name: String(name || "").trim() },
+    });
+    if (!updated.count) {
+      res.status(404).json({ error: "Head account not found" });
+      return;
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to update head account:", error);
+    res.status(500).json({ error: "Failed to update head account" });
+  }
+});
+
+app.delete("/api/head-accounts/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const deleted = await prisma.headAccount.deleteMany({
+      where: { id: req.params.id, userId },
+    });
+    if (!deleted.count) {
+      res.status(404).json({ error: "Head account not found" });
+      return;
+    }
+    res.status(204).send();
+  } catch (error) {
+    console.error("Failed to delete head account:", error);
+    res.status(500).json({ error: "Failed to delete head account" });
   }
 });
 
@@ -1465,6 +1748,9 @@ app.post("/api/bank/sync", async (req, res) => {
   try {
     const { accountId, fromDate, toDate } = req.body || {};
     const userId = req.user.id;
+    const range = normalizeDateRange(fromDate, toDate);
+    const fromIso = range.from ? range.from.toISOString() : undefined;
+    const toIso = range.to ? range.to.toISOString() : undefined;
     let connections;
     if (accountId) {
       const acct = await prisma.bankAccount.findFirst({
@@ -1554,8 +1840,8 @@ app.post("/api/bank/sync", async (req, res) => {
 
           const txns =
             acct.type === "card"
-              ? await fetchCardTransactions(connection.accessToken, acct.id, fromDate, toDate).catch(() => [])
-              : await fetchTransactions(connection.accessToken, acct.id, fromDate, toDate).catch(() => []);
+              ? await fetchCardTransactions(connection.accessToken, acct.id, fromIso, toIso).catch(() => [])
+              : await fetchTransactions(connection.accessToken, acct.id, fromIso, toIso).catch(() => []);
           for (const tx of txns) {
             const providerTransactionId = tx.transaction_id || tx.id || tx.normalised_provider_transaction_id;
             if (!providerTransactionId) continue;
@@ -1601,11 +1887,11 @@ app.post("/api/bank/sync", async (req, res) => {
             where: {
               userId,
               accountId: account.id,
-              ...(fromDate || toDate
+              ...(range.from || range.to
                 ? {
                     date: {
-                      ...(fromDate ? { gte: new Date(fromDate) } : {}),
-                      ...(toDate ? { lte: new Date(toDate) } : {}),
+                      ...(range.from ? { gte: range.from } : {}),
+                      ...(range.to ? { lte: range.to } : {}),
                     },
                   }
                 : {}),
@@ -1683,6 +1969,7 @@ app.get("/api/transactions/drafts", async (req, res) => {
     const category = req.query.categoryId ? String(req.query.categoryId) : undefined;
     const fromDate = req.query.fromDate ? String(req.query.fromDate) : undefined;
     const toDate = req.query.toDate ? String(req.query.toDate) : undefined;
+    const range = normalizeDateRange(fromDate, toDate);
 
     const where = { userId };
     const orFilters = [];
@@ -1695,10 +1982,10 @@ app.get("/api/transactions/drafts", async (req, res) => {
     }
     if (accountId) where.accountId = accountId;
     if (category) where.category = category;
-    if (fromDate || toDate) {
+    if (range.from || range.to) {
       where.date = {
-        ...(fromDate ? { gte: new Date(fromDate) } : {}),
-        ...(toDate ? { lte: new Date(toDate) } : {}),
+        ...(range.from ? { gte: range.from } : {}),
+        ...(range.to ? { lte: range.to } : {}),
       };
     }
     if (orFilters.length) where.OR = orFilters;
@@ -1769,6 +2056,10 @@ app.post("/api/transactions/drafts", async (req, res) => {
     if (!headAccount) {
       res.status(400).json({ success: false, error: "Head Account is required." });
       return;
+    }
+    await ensureHeadAccount(userId, headAccount);
+    if (typeof body.category === "string") {
+      await ensureUserCategory(userId, body.category);
     }
     const attachments =
       Array.isArray(body.attachments) ? body.attachments : typeof body.attachments === "string" ? body.attachments.split(",") : [];
@@ -1885,7 +2176,10 @@ app.patch("/api/transactions/drafts/:id", async (req, res) => {
     if (body.amount !== undefined && body.amount !== null && !Number.isNaN(Number(body.amount))) {
       data.amount = Number(body.amount);
     }
-    if (typeof body.category === "string") data.category = body.category;
+    if (typeof body.category === "string") {
+      data.category = body.category;
+      await ensureUserCategory(userId, body.category);
+    }
     if (typeof body.descriptionVia === "string") data.descriptionVia = body.descriptionVia;
     if (typeof body.description === "string") data.descriptionVia = body.description;
     if (typeof body.direction === "string") data.direction = body.direction;
@@ -1915,6 +2209,7 @@ app.patch("/api/transactions/drafts/:id", async (req, res) => {
         res.status(400).json({ success: false, error: "Head Account is required." });
         return;
       }
+      await ensureHeadAccount(userId, headAccount);
       metaUpdate.headAccount = headAccount;
     }
     if (typeof body.subCategory === "string") metaUpdate.subCategory = body.subCategory;
@@ -1993,39 +2288,6 @@ app.post("/api/transactions/drafts/:id/approve", async (req, res) => {
       res.status(404).json({ success: false, error: "Transaction not found" });
       return;
     }
-
-    const providerTxId = bankTx.providerTransactionId || undefined;
-    if (providerTxId) {
-      const existing = await prisma.transaction.findFirst({
-        where: { userId, providerTxId },
-        select: { id: true },
-      });
-      if (existing) {
-        res.json({ success: true, alreadyApproved: true });
-        return;
-      }
-    }
-
-    const amount = bankTx.amount ?? 0;
-    const merchant = bankTx.merchant || bankTx.descriptionVia || "Unknown";
-    const card = bankTx.account?.type === "card"
-      ? await prisma.card.findFirst({ where: { userId, name: bankTx.account?.name || "" } })
-      : null;
-    await prisma.transaction.create({
-      data: {
-        userId,
-        cardId: card?.id || null,
-        providerTxId: providerTxId || null,
-        merchant,
-        amount: Math.abs(amount),
-        category: bankTx.category || "Uncategorized",
-        subCategory: null,
-        description: bankTx.descriptionVia || "",
-        date: bankTx.date ? new Date(bankTx.date) : new Date(),
-        transactionType: amount < 0 ? "expense" : "income",
-      },
-    });
-
     res.json({ success: true });
   } catch (error) {
     console.error("transactions approve error", error);
@@ -2037,22 +2299,54 @@ app.get("/api/transactions", async (req, res) => {
   try {
     const userId = req.user.id;
     const { cardId, category, transactionType, dateFrom, dateTo, limit } = req.query;
-    const where = { userId };
-    if (cardId) where.cardId = String(cardId);
+    const where = {
+      userId,
+      providerTransactionId: { startsWith: "manual-" },
+    };
     if (category) where.category = String(category);
-    if (transactionType) where.transactionType = String(transactionType);
     if (dateFrom || dateTo) {
-      where.date = {};
-      if (dateFrom) where.date.gte = new Date(String(dateFrom));
-      if (dateTo) where.date.lte = new Date(String(dateTo));
+      const range = normalizeDateRange(
+        dateFrom ? String(dateFrom) : undefined,
+        dateTo ? String(dateTo) : undefined
+      );
+      where.date = {
+        ...(range.from ? { gte: range.from } : {}),
+        ...(range.to ? { lte: range.to } : {}),
+      };
     }
-    const transactions = await prisma.transaction.findMany({
+    const takeCount = limit ? Number(limit) : 1000;
+    const transactions = await prisma.bankTransaction.findMany({
       where,
-      include: { card: true },
+      include: { meta: true },
       orderBy: { date: "desc" },
-      take: limit ? Number(limit) : 1000,
+      take: takeCount,
     });
-    res.json(transactions);
+    const mapped = transactions.map((tx) => {
+      const manualMeta = getManualRawMeta(tx.raw);
+      return {
+        id: tx.id,
+        userId: tx.userId,
+        cardId: manualMeta?.cardId || null,
+        providerTxId: tx.providerTransactionId || null,
+        merchant: tx.merchant || "",
+        amount: Math.abs(tx.amount ?? 0),
+        category: tx.category || "",
+        subCategory: tx.meta?.subCategory || null,
+        description: tx.descriptionVia || "",
+        date: tx.date,
+        transactionType: manualMeta?.transactionType || (tx.amount < 0 ? "expense" : "income"),
+        loanTo: manualMeta?.loanTo || null,
+        loanFrom: manualMeta?.loanFrom || null,
+        createdAt: tx.createdAt,
+      };
+    });
+    const filtered = mapped.filter((tx) => {
+      if (cardId && tx.cardId !== String(cardId)) return false;
+      if (transactionType && tx.transactionType !== String(transactionType)) return false;
+      return true;
+    });
+    const capped = limit ? filtered.slice(0, takeCount) : filtered;
+    res.json(capped);
   } catch (error) {
     console.error("Failed to fetch transactions:", error);
     res.status(500).json({ error: "Failed to fetch transactions" });
@@ -2062,15 +2356,35 @@ app.get("/api/transactions", async (req, res) => {
 app.get("/api/transactions/:id", async (req, res) => {
   try {
     const userId = req.user.id;
-    const transaction = await prisma.transaction.findFirst({
-      where: { id: req.params.id, userId },
-      include: { card: true },
+    const transaction = await prisma.bankTransaction.findFirst({
+      where: {
+        id: req.params.id,
+        userId,
+        providerTransactionId: { startsWith: "manual-" },
+      },
+      include: { meta: true },
     });
     if (!transaction) {
       res.status(404).json({ error: "Transaction not found" });
       return;
     }
-    res.json(transaction);
+    const manualMeta = getManualRawMeta(transaction.raw);
+    res.json({
+      id: transaction.id,
+      userId: transaction.userId,
+      cardId: manualMeta?.cardId || null,
+      providerTxId: transaction.providerTransactionId || null,
+      merchant: transaction.merchant || "",
+      amount: Math.abs(transaction.amount ?? 0),
+      category: transaction.category || "",
+      subCategory: transaction.meta?.subCategory || null,
+      description: transaction.descriptionVia || "",
+      date: transaction.date,
+      transactionType: manualMeta?.transactionType || (transaction.amount < 0 ? "expense" : "income"),
+      loanTo: manualMeta?.loanTo || null,
+      loanFrom: manualMeta?.loanFrom || null,
+      createdAt: transaction.createdAt,
+    });
   } catch (error) {
     console.error("Failed to fetch transaction:", error);
     res.status(500).json({ error: "Failed to fetch transaction" });
@@ -2085,34 +2399,55 @@ app.post("/api/transactions", async (req, res) => {
       res.status(400).json({ error: "merchant, amount, and category are required" });
       return;
     }
-    if (payload.cardId) {
-      const card = await prisma.card.findFirst({ where: { id: payload.cardId, userId } });
-      if (!card) {
-        res.status(404).json({ error: "Card not found" });
-        return;
-      }
+    const amountInput = Number(payload.amount);
+    if (!Number.isFinite(amountInput)) {
+      res.status(400).json({ error: "amount must be a valid number" });
+      return;
     }
     const transactionType = payload.transactionType || "expense";
+    const { account, card } = await resolveManualAccountForTransaction(userId, payload.cardId || null);
+    if (payload.cardId && !card) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
+    const signedAmount =
+      transactionType === "expense" || transactionType === "loan_given"
+        ? -Math.abs(amountInput)
+        : Math.abs(amountInput);
+    await ensureUserCategory(userId, payload.category);
+    const hasSubCategory = Object.prototype.hasOwnProperty.call(payload, "subCategory");
     await prisma.$transaction(async (tx) => {
-      await tx.transaction.create({
+      await tx.bankTransaction.create({
         data: {
           userId,
-          cardId: payload.cardId || null,
+          accountId: account.id,
+          providerTransactionId: `manual-${Date.now()}`,
           merchant: payload.merchant,
-          amount: Number(payload.amount),
+          amount: signedAmount,
+          direction: signedAmount < 0 ? "debit" : "credit",
           category: payload.category,
-          subCategory: payload.subCategory || null,
-          description: payload.description || "",
+          descriptionVia: payload.description || null,
           date: payload.date ? new Date(payload.date) : new Date(),
-          transactionType,
-          loanTo: payload.loanTo || null,
-          loanFrom: payload.loanFrom || null,
+          raw: buildManualRaw({
+            cardId: card?.id || null,
+            transactionType,
+            loanTo: payload.loanTo || null,
+            loanFrom: payload.loanFrom || null,
+          }),
+          meta: hasSubCategory
+            ? {
+                create: {
+                  userId,
+                  subCategory: payload.subCategory || null,
+                },
+              }
+            : undefined,
         },
       });
-      if (transactionType === "expense" && payload.cardId) {
+      if (transactionType === "expense" && card?.id) {
         await tx.card.update({
-          where: { id: payload.cardId },
-          data: { balance: { increment: Number(payload.amount) } },
+          where: { id: card.id },
+          data: { balance: { increment: Math.abs(amountInput) } },
         });
       }
     });
@@ -2127,60 +2462,92 @@ app.put("/api/transactions/:id", async (req, res) => {
   try {
     const userId = req.user.id;
     const payload = req.body || {};
-    const oldTransaction = await prisma.transaction.findFirst({
+    const oldTransaction = await prisma.bankTransaction.findFirst({
       where: { id: req.params.id, userId },
+      include: { meta: true },
     });
     if (!oldTransaction) {
       res.status(404).json({ error: "Transaction not found" });
       return;
     }
-    if (payload.cardId) {
-      const card = await prisma.card.findFirst({ where: { id: payload.cardId, userId } });
-      if (!card) {
-        res.status(404).json({ error: "Card not found" });
-        return;
-      }
+    const isManual =
+      typeof oldTransaction.providerTransactionId === "string" &&
+      oldTransaction.providerTransactionId.startsWith("manual-");
+    if (!isManual) {
+      res.status(403).json({ error: "Only manual transactions can be updated." });
+      return;
     }
+    const oldManualMeta = getManualRawMeta(oldTransaction.raw);
+    const oldCardId = oldManualMeta?.cardId || null;
+    const oldTransactionType = oldManualMeta?.transactionType || (oldTransaction.amount < 0 ? "expense" : "income");
+    const nextCardId =
+      payload.cardId === undefined ? oldCardId : payload.cardId ? String(payload.cardId) : null;
+    const { account, card } = await resolveManualAccountForTransaction(userId, nextCardId);
+    if (nextCardId && !card) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
+    const nextTransactionType = payload.transactionType || oldTransactionType || "expense";
+    const amountInput =
+      payload.amount !== undefined ? Number(payload.amount) : Math.abs(oldTransaction.amount);
+    if (!Number.isFinite(amountInput)) {
+      res.status(400).json({ error: "amount must be a valid number" });
+      return;
+    }
+    const signedAmount =
+      nextTransactionType === "expense" || nextTransactionType === "loan_given"
+        ? -Math.abs(amountInput)
+        : Math.abs(amountInput);
+    if (payload.category) {
+      await ensureUserCategory(userId, payload.category);
+    }
+    const hasSubCategory = Object.prototype.hasOwnProperty.call(payload, "subCategory");
     await prisma.$transaction(async (tx) => {
-      await tx.transaction.update({
+      await tx.bankTransaction.update({
         where: { id: req.params.id },
         data: {
-          cardId: payload.cardId || null,
-          merchant: payload.merchant,
-          amount: Number(payload.amount),
-          category: payload.category,
-          subCategory: payload.subCategory || null,
-          description: payload.description || "",
-          date: payload.date ? new Date(payload.date) : new Date(),
-          transactionType: payload.transactionType || "expense",
-          loanTo: payload.loanTo || null,
-          loanFrom: payload.loanFrom || null,
+          accountId: account.id,
+          merchant: payload.merchant ?? oldTransaction.merchant,
+          amount: signedAmount,
+          direction: signedAmount < 0 ? "debit" : "credit",
+          category: payload.category ?? oldTransaction.category,
+          descriptionVia: payload.description ?? oldTransaction.descriptionVia,
+          date: payload.date ? new Date(payload.date) : oldTransaction.date,
+          raw: buildManualRaw({
+            cardId: card?.id || null,
+            transactionType: nextTransactionType,
+            loanTo: payload.loanTo ?? oldManualMeta?.loanTo,
+            loanFrom: payload.loanFrom ?? oldManualMeta?.loanFrom,
+          }),
+          meta: hasSubCategory
+            ? {
+                upsert: {
+                  create: {
+                    userId,
+                    subCategory: payload.subCategory || null,
+                  },
+                  update: {
+                    subCategory: payload.subCategory || null,
+                  },
+                },
+              }
+            : undefined,
         },
       });
 
-      const transactionType = payload.transactionType || "expense";
-      const oldTransactionType = oldTransaction.transactionType || "expense";
-      if (transactionType === "expense" || oldTransactionType === "expense") {
-        const amountDiff = Number(payload.amount) - oldTransaction.amount;
-        if (oldTransaction.cardId !== payload.cardId) {
-          if (oldTransaction.cardId && oldTransactionType === "expense") {
-            await tx.card.update({
-              where: { id: oldTransaction.cardId },
-              data: { balance: { decrement: oldTransaction.amount } },
-            });
-          }
-          if (payload.cardId && transactionType === "expense") {
-            await tx.card.update({
-              where: { id: payload.cardId },
-              data: { balance: { increment: Number(payload.amount) } },
-            });
-          }
-        } else if (payload.cardId && transactionType === "expense") {
-          await tx.card.update({
-            where: { id: payload.cardId },
-            data: { balance: { increment: amountDiff } },
-          });
-        }
+      const oldEffect = oldTransactionType === "expense" ? Math.abs(oldTransaction.amount) : 0;
+      const newEffect = nextTransactionType === "expense" ? Math.abs(signedAmount) : 0;
+      if (oldCardId && oldEffect > 0) {
+        await tx.card.update({
+          where: { id: oldCardId },
+          data: { balance: { decrement: oldEffect } },
+        });
+      }
+      if (card?.id && newEffect > 0) {
+        await tx.card.update({
+          where: { id: card.id },
+          data: { balance: { increment: newEffect } },
+        });
       }
     });
     res.json({ success: true });
@@ -2193,17 +2560,30 @@ app.put("/api/transactions/:id", async (req, res) => {
 app.delete("/api/transactions/:id", async (req, res) => {
   try {
     const userId = req.user.id;
-    const existing = await prisma.transaction.findFirst({ where: { id: req.params.id, userId } });
+    const existing = await prisma.bankTransaction.findFirst({
+      where: { id: req.params.id, userId },
+    });
     if (!existing) {
       res.status(404).json({ error: "Transaction not found" });
       return;
     }
+    const isManual =
+      typeof existing.providerTransactionId === "string" &&
+      existing.providerTransactionId.startsWith("manual-");
+    if (!isManual) {
+      res.status(403).json({ error: "Only manual transactions can be deleted." });
+      return;
+    }
+    const manualMeta = getManualRawMeta(existing.raw);
+    const cardId = manualMeta?.cardId || null;
+    const transactionType =
+      manualMeta?.transactionType || (existing.amount < 0 ? "expense" : "income");
     await prisma.$transaction(async (tx) => {
-      await tx.transaction.delete({ where: { id: req.params.id } });
-      if (existing.transactionType === "expense" && existing.cardId) {
+      await tx.bankTransaction.delete({ where: { id: req.params.id } });
+      if (transactionType === "expense" && cardId) {
         await tx.card.update({
-          where: { id: existing.cardId },
-          data: { balance: { decrement: existing.amount } },
+          where: { id: cardId },
+          data: { balance: { decrement: Math.abs(existing.amount) } },
         });
       }
     });

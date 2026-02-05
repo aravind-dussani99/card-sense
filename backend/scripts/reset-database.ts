@@ -7,21 +7,13 @@ async function resetDatabase() {
         console.log('Starting database reset...');
 
         // Delete in order to respect foreign key constraints
-        console.log('Deleting draft transactions...');
-        const deletedDrafts = await prisma.draftTransaction.deleteMany({});
-        console.log(`Deleted ${deletedDrafts.count} draft transactions`);
+        console.log('Deleting bank transaction metadata...');
+        const deletedTransactionMeta = await prisma.bankTransactionMeta.deleteMany({});
+        console.log(`Deleted ${deletedTransactionMeta.count} bank transaction metadata`);
 
-        console.log('Deleting transactions...');
-        const deletedTransactions = await prisma.transaction.deleteMany({});
-        console.log(`Deleted ${deletedTransactions.count} transactions`);
-
-        console.log('Deleting offers...');
-        const deletedOffers = await prisma.offer.deleteMany({});
-        console.log(`Deleted ${deletedOffers.count} offers`);
-
-        console.log('Deleting processed emails...');
-        const deletedProcessedEmails = await prisma.processedEmail.deleteMany({});
-        console.log(`Deleted ${deletedProcessedEmails.count} processed emails`);
+        console.log('Deleting bank transactions...');
+        const deletedTransactions = await prisma.bankTransaction.deleteMany({});
+        console.log(`Deleted ${deletedTransactions.count} bank transactions`);
 
         // EmailSenderStats might not exist in schema, skip if error
         try {
@@ -51,10 +43,8 @@ async function resetDatabase() {
 
         console.log('\n✅ Database reset complete!');
         console.log('Summary:');
-        console.log(`  - Draft Transactions: ${deletedDrafts.count}`);
-        console.log(`  - Transactions: ${deletedTransactions.count}`);
-        console.log(`  - Offers: ${deletedOffers.count}`);
-        console.log(`  - Processed Emails: ${deletedProcessedEmails.count}`);
+        console.log(`  - Bank Transaction Meta: ${deletedTransactionMeta.count}`);
+        console.log(`  - Bank Transactions: ${deletedTransactions.count}`);
         console.log(`  - Cards: ${deletedCards.count}`);
     } catch (error) {
         console.error('Error resetting database:', error);
@@ -73,4 +63,3 @@ resetDatabase()
         console.error('\n❌ Reset failed:', error);
         process.exit(1);
     });
-

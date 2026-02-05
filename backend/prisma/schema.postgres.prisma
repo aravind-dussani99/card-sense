@@ -36,31 +36,7 @@ model Card {
   color                    String                      @default("bg-gray-800")
   createdAt                DateTime                    @default(now())
   updatedAt                DateTime                    @updatedAt
-  transactions             Transaction[]
-  draftTransactions        DraftTransaction[]
-  offers                   Offer[]
   credential               CardCredential?
-}
-
-model Transaction {
-  id              String   @id @default(uuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cardId          String?
-  card            Card?    @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  providerTxId    String?
-  merchant        String
-  amount          Float
-  category        String
-  subCategory     String?
-  description     String?
-  date            DateTime @default(now())
-  transactionType String   @default("expense") // "expense", "loan_given", "loan_received"
-  loanTo          String? // Person/entity who received the loan (for loan_given)
-  loanFrom        String? // Person/entity who gave the loan (for loan_received)
-  createdAt       DateTime @default(now())
-
-  @@unique([userId, providerTxId])
 }
 
 model Category {
@@ -86,6 +62,17 @@ model SubCategory {
   updatedAt                 DateTime                    @updatedAt
 }
 
+model HeadAccount {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+}
+
 model CardType {
   id        String   @id @default(uuid())
   name      String   @unique // This IS the network (e.g., "Mastercard", "Visa", "American Express")
@@ -106,33 +93,6 @@ model Bank {
   cards     Card[]
 }
 
-model FromEntity {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String
-  type      String? // "vendor", "company", "person", etc.
-  icon      String?
-  color     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, name])
-}
-
-model ToEntity {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String
-  type      String? // "vendor", "person", "debt", etc.
-  icon      String?
-  color     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, name])
-}
 
 enum UserRole {
   USER
@@ -152,13 +112,7 @@ model User {
   emailTokens      EmailVerificationToken[]
   passwordTokens   PasswordResetToken[]
   cards            Card[]
-  transactions     Transaction[]
   categories       Category[]
-  fromEntities     FromEntity[]
-  toEntities       ToEntity[]
-  draftTransactions DraftTransaction[]
-  offers           Offer[]
-  processedEmails  ProcessedEmail[]
   bankConnections  BankConnection[]
   bankAccounts     BankAccount[]
   bankTransactions BankTransaction[]
@@ -166,7 +120,7 @@ model User {
   bankAccountCredentials BankAccountCredential[]
   cardCredentials  CardCredential[]
   merchantRules    MerchantCategoryRule[]
-  chats            ChatSession[]
+  headAccounts     HeadAccount[]
 }
 
 model EmailVerificationToken {
@@ -189,81 +143,6 @@ model PasswordResetToken {
   createdAt  DateTime @default(now())
 }
 
-model DraftTransaction {
-  id                String   @id @default(uuid())
-  userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emailId           String? // Email message ID to prevent duplicates (nullable for bank imports)
-  cardId            String?
-  card              Card?    @relation(fields: [cardId], references: [id], onDelete: SetNull)
-  bankAccountId     String? // Link to BankAccount if from Open Banking
-  providerTxId      String? // Provider transaction id to prevent duplicates
-  source            String? // "email", "statement", "open_banking"
-  merchant          String
-  amount            Float
-  category          String?
-  subCategory       String?
-  description       String?
-  date              DateTime
-  transactionType   String   @default("expense")
-  status            String   @default("pending") // "pending", "approved", "rejected", "modified"
-  originalData      String? // JSON of original extracted data
-  modifiedData      String? // JSON of user-modified data
-  emailSubject      String?
-  emailBody         String? // Extracted email content
-  needsCardCreation Boolean  @default(false) // True if card/account needs to be created
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  @@unique([userId, providerTxId])
-  @@unique([userId, emailId])
-}
-
-model Offer {
-  id              String   @id @default(uuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emailId         String // Email message ID to prevent duplicates
-  title           String
-  description     String
-  cardId          String?
-  card            Card?    @relation(fields: [cardId], references: [id], onDelete: SetNull)
-  discountAmount  Float? // Amount saved if offer is used
-  discountPercent Float? // Percentage discount
-  minSpend        Float? // Minimum spend required
-  maxDiscount     Float? // Maximum discount cap
-  startDate       DateTime
-  endDate         DateTime
-  terms           String? // Terms and conditions
-  category        String? // Offer category (cashback, discount, etc.)
-  status          String   @default("active") // "active", "archived", "used"
-  isRead          Boolean  @default(false) // Whether the offer has been read
-  senderEmail     String? // Sender email address for filtering and tracking
-  emailSubject    String?
-  emailBody       String? // Extracted email content
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@unique([userId, emailId])
-}
-
-model ProcessedEmail {
-  id               String    @id @default(uuid())
-  userId           String
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emailId          String    // Email message ID
-  emailSubject     String?
-  originalDate     DateTime? // Original email date (when email was sent/received)
-  processedAt      DateTime  @default(now())
-  transactionCount Int       @default(0) // Number of transactions extracted
-  offerCount       Int       @default(0) // Number of offers extracted
-  status           String    @default("processed") // "processed", "failed", "partial"
-  errorMessage     String?
-  emailBody        String? // Store email body for viewing in dialog
-  createdAt        DateTime  @default(now())
-
-  @@unique([userId, emailId])
-}
 
 // Open Banking (TrueLayer or other providers)
 model BankConnection {
@@ -383,15 +262,6 @@ model MerchantCategoryRule {
   @@unique([userId, merchantKey])
 }
 
-model ChatSession {
-  id        String        @id @default(uuid())
-  userId    String
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String
-  createdAt DateTime      @default(now())
-  messages  ChatMessage[]
-}
-
 model CardCredential {
   id               String   @id @default(uuid())
   userId           String
@@ -402,13 +272,4 @@ model CardCredential {
   encryptedPayload String
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
-}
-
-model ChatMessage {
-  id        String      @id @default(uuid())
-  chatId    String
-  chat      ChatSession @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  role      String // user or assistant
-  content   String
-  createdAt DateTime    @default(now())
 }

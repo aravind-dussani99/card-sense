@@ -5,6 +5,7 @@ import { ReferenceDataManager } from "@/components/reference-data-manager"
 import { getCardTypes } from "@/app/actions/card-type-actions"
 import { getBanks } from "@/app/actions/bank-actions"
 import { getCategories } from "@/app/actions/category-actions"
+import { getHeadAccounts } from "@/app/actions/head-account-actions"
 
 export const metadata: Metadata = {
     title: "Reference Data - CardSense",
@@ -14,10 +15,11 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function ReferenceDataPage() {
-    const [cardTypes, banks, categories] = await Promise.all([
+    const [cardTypes, banks, categories, headAccounts] = await Promise.all([
         getCardTypes(),
         getBanks(),
         getCategories(),
+        getHeadAccounts(),
     ]);
 
     return (
@@ -36,6 +38,7 @@ export default async function ReferenceDataPage() {
                     initialCardTypes={cardTypes}
                     initialBanks={banks}
                     initialCategories={categories}
+                    initialHeadAccounts={headAccounts}
                 />
             </div>
         </div>

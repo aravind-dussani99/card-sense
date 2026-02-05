@@ -5,6 +5,7 @@ import { TransactionsList } from "@/components/transactions-list";
 import { getCards } from "@/app/actions/card-actions";
 import { getCategories } from "@/app/actions/category-actions";
 import { getBankAccounts } from "@/app/actions/bank-actions";
+import { getHeadAccounts } from "@/app/actions/head-account-actions";
 import { TransactionsHeaderActions } from "@/components/transactions-header-actions";
 
 export const metadata: Metadata = {
@@ -15,10 +16,11 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function TransactionsPage() {
-    const [cards, categories, accounts] = await Promise.all([
+    const [cards, categories, accounts, headAccounts] = await Promise.all([
         getCards(),
         getCategories(),
         getBankAccounts(),
+        getHeadAccounts(),
     ]);
 
     return (
@@ -48,6 +50,7 @@ export default async function TransactionsPage() {
                         cards={cards}
                         categories={categories}
                         accounts={accounts}
+                        headAccounts={headAccounts}
                     />
                 </div>
             </div>

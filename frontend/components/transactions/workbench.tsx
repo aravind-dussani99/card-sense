@@ -16,6 +16,16 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -81,7 +91,7 @@ const DateInput = ({
     const inputRef = useRef<HTMLInputElement | null>(null);
     const buttonOffset = id?.includes("dialog") ? "right-3" : "right-2";
     return (
-        <div className="relative">
+        <div className="relative min-w-[140px] w-full">
             <Input
                 ref={inputRef}
                 id={id}
@@ -123,6 +133,7 @@ interface TransactionsWorkbenchProps {
         name: string;
         subCategories: Array<{ id: string; name: string; categoryId: string }>;
     }>;
+    headAccounts: Array<{ id: string; name: string }>;
 }
 
 const SYNC_MODES = [
@@ -156,7 +167,7 @@ const getAuthHeaders = () => {
     return headers;
 };
 
-export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialMeta, categories }: TransactionsWorkbenchProps) {
+export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialMeta, categories, headAccounts }: TransactionsWorkbenchProps) {
     const monthToDate = useMemo(() => getMonthToDateRange(), []);
     const [syncMode, setSyncMode] = useState<SyncModeOption>("all");
     const [selectedSources, setSelectedSources] = useState<string[]>([]);
@@ -168,6 +179,11 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
     const [drafts, setDrafts] = useState<DraftRecord[]>(initialDrafts);
     const [meta, setMeta] = useState<Meta>(initialMeta);
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+    const [saveNotice, setSaveNotice] = useState<{ open: boolean; success: boolean; message: string }>({
+        open: false,
+        success: true,
+        message: "",
+    });
     const [dialog, setDialog] = useState<DialogState>({ mode: null });
     const [mappingLoading, setMappingLoading] = useState(false);
     const [editForm, setEditForm] = useState({
@@ -205,6 +221,7 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         toDate?: string;
         sources?: string;
     }>({ status: "idle", message: "" });
+    const [copyNotice, setCopyNotice] = useState("");
 
     useEffect(() => {
         if (syncMode !== "custom") {
@@ -637,25 +654,22 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
         setEditLoading(false);
     };
 
-    const handleCategorySelection = (value: string) => {
-        if (value === "none") {
+    const handleCategoryInput = (value: string) => {
+        const trimmed = value.trim();
+        if (!trimmed) {
             setEditForm((prev) => ({ ...prev, categoryId: "", category: "", subCategory: "" }));
             return;
         }
-        const cat = categoryLookup.get(value);
+        const match = categoryOptions.find((category) => category.name.toLowerCase() === trimmed.toLowerCase());
         setEditForm((prev) => ({
             ...prev,
-            categoryId: value,
-            category: cat?.name || "",
+            categoryId: match?.id || "__unmatched__",
+            category: trimmed,
             subCategory: "",
         }));
     };
 
-    const handleSubCategorySelection = (value: string) => {
-        if (value === "none") {
-            setEditForm((prev) => ({ ...prev, subCategory: "" }));
-            return;
-        }
+    const handleSubCategoryInput = (value: string) => {
         setEditForm((prev) => ({ ...prev, subCategory: value }));
     };
 
@@ -694,11 +708,24 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             if (!response.ok || !data.success) throw new Error(data.error || "Update failed");
             setDrafts((prev) => prev.map((draft) => (draft.id === dialog.draft?.id ? mapDraftFromApi(data.data) : draft)));
             setFeedback({ type: "success", message: "Transaction updated." });
+            setSaveNotice({
+                open: true,
+                success: true,
+                message: "Changes saved successfully.",
+            });
             closeDialog();
+            void fetchDrafts(meta.page);
         } catch (error: unknown) {
-            setFeedback({ type: "error", message: getErrorMessage(error) || "Update failed" });
-            setEditLoading(false);
+            const message = getErrorMessage(error) || "Update failed";
+            setFeedback({ type: "error", message });
+            setSaveNotice({
+                open: true,
+                success: false,
+                message,
+            });
+            closeDialog();
         }
+        setEditLoading(false);
     };
 
     const submitAdd = async () => {
@@ -735,10 +762,22 @@ export function TransactionsWorkbench({ accounts, cards, initialDrafts, initialM
             const data = await readJson<{ success: boolean; data: DraftRecord; error?: string }>(response);
             if (!response.ok || !data.success) throw new Error(data.error || "Create failed");
             setFeedback({ type: "success", message: "Transaction added." });
+            setSaveNotice({
+                open: true,
+                success: true,
+                message: "Transaction added successfully.",
+            });
             closeDialog();
-            void fetchDrafts(1);
+            void fetchDrafts(meta.page);
         } catch (error: unknown) {
-            setFeedback({ type: "error", message: getErrorMessage(error) || "Create failed" });
+            const message = getErrorMessage(error) || "Create failed";
+            setFeedback({ type: "error", message });
+            setSaveNotice({
+                open: true,
+                success: false,
+                message,
+            });
+            closeDialog();
         } finally {
             setEditLoading(false);
         }
@@ -931,7 +970,7 @@ Message: ${syncReport.message}`;
                         <CardDescription className="text-xs">Filter by account, date, category, or keyword.</CardDescription>
                     </CardHeader>
                     <CardContent className="pt-0">
-                        <div className="grid gap-3 lg:grid-cols-[1fr_0.9fr_1.1fr_0.9fr_auto]">
+                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_minmax(240px,1fr)_minmax(240px,1.2fr)_minmax(200px,1fr)_auto]">
                             <div className="space-y-1.5">
                                 <Label>Accounts / Cards</Label>
                                 <Select
@@ -1309,9 +1348,11 @@ Message: ${syncReport.message}`;
                                 onClick={async () => {
                                     try {
                                         await navigator.clipboard.writeText(syncReportText);
-                                        setFeedback({ type: "success", message: "Sync report copied to clipboard." });
+                                        setCopyNotice("Report copied to clipboard.");
+                                        setTimeout(() => setCopyNotice(""), 4000);
                                     } catch {
-                                        setFeedback({ type: "error", message: "Failed to copy report." });
+                                        setCopyNotice("Failed to copy report.");
+                                        setTimeout(() => setCopyNotice(""), 5000);
                                     }
                                 }}
                             >
@@ -1325,9 +1366,14 @@ Message: ${syncReport.message}`;
                                 </Button>
                             </Link>
                         </div>
-                        <Button type="button" onClick={() => setSyncReportOpen(false)}>
-                            Close
-                        </Button>
+                        <div className="flex items-center gap-3">
+                            {copyNotice && (
+                                <span className="text-xs text-muted-foreground">{copyNotice}</span>
+                            )}
+                            <Button type="button" onClick={() => setSyncReportOpen(false)}>
+                                Close
+                            </Button>
+                        </div>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -1340,7 +1386,7 @@ Message: ${syncReport.message}`;
                             Filter by account, date, category, or keyword.
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-[1fr_1.25fr_1.25fr_1fr]">
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_minmax(240px,1fr)_minmax(240px,1.2fr)_minmax(200px,1fr)]">
                         <div className="space-y-1.5">
                             <Label>Accounts / Cards</Label>
                             <Select
@@ -1433,21 +1479,44 @@ Message: ${syncReport.message}`;
                     </DialogHeader>
                     {dialog.mode === "view" && dialog.draft && (
                         <div className="space-y-4 text-sm">
+                            <div className="rounded-lg border bg-muted/40 p-4">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <div className="text-xs uppercase text-muted-foreground">Amount</div>
+                                        <div className="text-2xl font-semibold">
+                                            {formatCurrency(dialog.draft.amount, dialog.draft.currency)}
+                                        </div>
+                                    </div>
+                                    <div className="text-sm text-muted-foreground">
+                                        {formatDate(dialog.draft.date)}
+                                    </div>
+                                </div>
+                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    <Badge variant="outline">{dialog.draft.category || "Unassigned"}</Badge>
+                                    <span className="text-xs text-muted-foreground">
+                                        {categorySourceLabel(dialog.draft.categorySource)}
+                                    </span>
+                                </div>
+                            </div>
                             <div className="grid gap-3 md:grid-cols-2">
-                                <div>
+                                <div className="rounded-lg border p-3">
                                     <p className="text-xs uppercase text-muted-foreground">From</p>
                                     <p className="font-semibold">{dialog.draft.fromEntity || renderSourceLabel(dialog.draft)}</p>
                                     <p className="text-xs text-muted-foreground capitalize">{dialog.draft.account?.type || "account"}</p>
                                 </div>
-                                <div>
+                                <div className="rounded-lg border p-3">
                                     <p className="text-xs uppercase text-muted-foreground">Via</p>
                                     <p>{dialog.draft.viaEntity || "—"}</p>
                                 </div>
-                                <div>
+                                <div className="rounded-lg border p-3">
                                     <p className="text-xs uppercase text-muted-foreground">To</p>
                                     <p className="font-semibold">{dialog.draft.toEntity || dialog.draft.merchantTo || dialog.draft.descriptionVia || "—"}</p>
                                 </div>
-                                <div>
+                                <div className="rounded-lg border p-3">
+                                    <p className="text-xs uppercase text-muted-foreground">Head Account</p>
+                                    <p>{dialog.draft.headAccount || "—"}</p>
+                                </div>
+                                <div className="rounded-lg border p-3">
                                     <p className="text-xs uppercase text-muted-foreground">Opening Balance</p>
                                     <p>
                                         {dialog.draft.openingBalance !== null && dialog.draft.openingBalance !== undefined
@@ -1455,11 +1524,7 @@ Message: ${syncReport.message}`;
                                             : "—"}
                                     </p>
                                 </div>
-                                <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Amount</p>
-                                    <p>{formatCurrency(dialog.draft.amount, dialog.draft.currency)}</p>
-                                </div>
-                                <div>
+                                <div className="rounded-lg border p-3">
                                     <p className="text-xs uppercase text-muted-foreground">Closing Balance</p>
                                     <p>
                                         {dialog.draft.closingBalance !== null && dialog.draft.closingBalance !== undefined
@@ -1467,37 +1532,26 @@ Message: ${syncReport.message}`;
                                             : "—"}
                                     </p>
                                 </div>
-                                <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Head Account</p>
-                                    <p>{dialog.draft.headAccount || "—"}</p>
-                                </div>
-                                <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Category</p>
-                                    <p>{dialog.draft.category || "—"}</p>
-                                    <p className="text-xs text-muted-foreground">{categorySourceLabel(dialog.draft.categorySource)}</p>
-                                </div>
-                                <div>
+                                <div className="rounded-lg border p-3">
                                     <p className="text-xs uppercase text-muted-foreground">Sub-category</p>
                                     <p>{dialog.draft.subCategory || "—"}</p>
                                 </div>
-                                <div>
-                                    <p className="text-xs uppercase text-muted-foreground">Date</p>
-                                    <p>{formatDate(dialog.draft.date)}</p>
-                                </div>
-                                <div>
+                                <div className="rounded-lg border p-3">
                                     <p className="text-xs uppercase text-muted-foreground">Provider transaction id</p>
                                     <p>{dialog.draft.providerTransactionId || dialog.draft.id}</p>
                                 </div>
                             </div>
-                            <div className="space-y-2">
-                                <p className="text-xs uppercase text-muted-foreground">Remarks</p>
-                                <p>{dialog.draft.remarks || "—"}</p>
+                            <div className="grid gap-3 md:grid-cols-2">
+                                <div className="rounded-lg border p-3">
+                                    <p className="text-xs uppercase text-muted-foreground">Remarks</p>
+                                    <p>{dialog.draft.remarks || "—"}</p>
+                                </div>
+                                <div className="rounded-lg border p-3">
+                                    <p className="text-xs uppercase text-muted-foreground">Comments</p>
+                                    <p>{dialog.draft.comments || "—"}</p>
+                                </div>
                             </div>
-                            <div className="space-y-2">
-                                <p className="text-xs uppercase text-muted-foreground">Comments</p>
-                                <p>{dialog.draft.comments || "—"}</p>
-                            </div>
-                            <div className="space-y-2">
+                            <div className="rounded-lg border p-3">
                                 <p className="text-xs uppercase text-muted-foreground">Attachments</p>
                                 {dialog.draft.attachments && dialog.draft.attachments.length ? (
                                     <ul className="list-disc pl-4">
@@ -1530,7 +1584,13 @@ Message: ${syncReport.message}`;
                                         value={editForm.headAccount}
                                         onChange={(e) => setEditForm((prev) => ({ ...prev, headAccount: e.target.value }))}
                                         placeholder="Required"
+                                        list="head-account-suggestions"
                                     />
+                                    <datalist id="head-account-suggestions">
+                                        {headAccounts.map((account) => (
+                                            <option key={account.id} value={account.name} />
+                                        ))}
+                                    </datalist>
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label>Opening Balance</Label>
@@ -1552,27 +1612,17 @@ Message: ${syncReport.message}`;
                             <div className="grid gap-3 md:grid-cols-2">
                                 <div className="space-y-1.5">
                                     <Label>Category</Label>
-                                    <Select
-                                        value={editForm.categoryId || "none"}
-                                        onValueChange={handleCategorySelection}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select category" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none">Unassigned</SelectItem>
-                                            {editForm.categoryId === "__unmatched__" && (
-                                                <SelectItem value="__unmatched__">
-                                                    {editForm.category || "Unassigned"}
-                                                </SelectItem>
-                                            )}
-                                            {categoryOptions.map((category) => (
-                                                <SelectItem key={category.id} value={category.id}>
-                                                    {category.name}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <Input
+                                        value={editForm.category}
+                                        onChange={(e) => handleCategoryInput(e.target.value)}
+                                        placeholder="Select or type a category"
+                                        list="category-suggestions"
+                                    />
+                                    <datalist id="category-suggestions">
+                                        {categoryOptions.map((category) => (
+                                            <option key={category.id} value={category.name} />
+                                        ))}
+                                    </datalist>
                                     {dialog.mode === "edit" && (
                                         <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                                             <Button
@@ -1590,23 +1640,18 @@ Message: ${syncReport.message}`;
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label>Sub-category</Label>
-                                    <Select
-                                        value={editForm.subCategory || "none"}
-                                        onValueChange={handleSubCategorySelection}
-                                        disabled={!editForm.categoryId}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder={editForm.categoryId ? "Select sub-category" : "Pick a category first"} />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none">Unassigned</SelectItem>
-                                            {availableEditSubCategories.map((sub) => (
-                                                <SelectItem key={sub.id} value={sub.name}>
-                                                    {sub.name}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <Input
+                                        value={editForm.subCategory}
+                                        onChange={(e) => handleSubCategoryInput(e.target.value)}
+                                        placeholder={editForm.category ? "Select or type a sub-category" : "Pick a category first"}
+                                        list="sub-category-suggestions"
+                                        disabled={!editForm.category}
+                                    />
+                                    <datalist id="sub-category-suggestions">
+                                        {availableEditSubCategories.map((sub) => (
+                                            <option key={sub.id} value={sub.name} />
+                                        ))}
+                                    </datalist>
                                 </div>
                             </div>
                             <div className="grid gap-3 md:grid-cols-2">
@@ -1673,6 +1718,24 @@ Message: ${syncReport.message}`;
                     )}
                 </DialogContent>
             </Dialog>
+            <AlertDialog
+                open={saveNotice.open}
+                onOpenChange={(open) => setSaveNotice((prev) => ({ ...prev, open }))}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            {saveNotice.success ? "Changes saved" : "Save failed"}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {saveNotice.message}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogAction>OK</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

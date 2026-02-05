@@ -6,10 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ArrowLeft, Plus, Trash2, Edit2, CreditCard, Building2, Tag } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, Edit2, CreditCard, Building2, Tag, ClipboardList } from "lucide-react"
 import { getCardTypes, addCardType, updateCardType, deleteCardType } from "@/app/actions/card-type-actions"
 import { getBanks, addBank, updateBank, deleteBank } from "@/app/actions/bank-actions"
 import { getCategories, addCategory, updateCategory, deleteCategory, addSubCategory, deleteSubCategory, updateSubCategory } from "@/app/actions/category-actions"
+import { getHeadAccounts, addHeadAccount, updateHeadAccount, deleteHeadAccount } from "@/app/actions/head-account-actions"
 import {
     Dialog,
     DialogContent,
@@ -28,9 +29,9 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Bank, CardType, Category, SubCategory } from "@/lib/types"
+import { Bank, CardType, Category, SubCategory, HeadAccount } from "@/lib/types"
 
-type DataType = "cardTypes" | "banks" | "categories" | "subCategories";
+type DataType = "cardTypes" | "banks" | "categories" | "subCategories" | "headAccounts";
 
 interface ListItem {
     id: string;
@@ -46,13 +47,15 @@ interface ReferenceDataManagerProps {
     initialCardTypes: CardType[];
     initialBanks: Bank[];
     initialCategories: Category[];
+    initialHeadAccounts: HeadAccount[];
 }
 
-export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCategories }: ReferenceDataManagerProps) {
+export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCategories, initialHeadAccounts }: ReferenceDataManagerProps) {
     const router = useRouter();
     const [cardTypes, setCardTypes] = useState<CardType[]>(initialCardTypes);
     const [banks, setBanks] = useState<Bank[]>(initialBanks);
     const [categories, setCategories] = useState<Category[]>(initialCategories);
+    const [headAccounts, setHeadAccounts] = useState<HeadAccount[]>(initialHeadAccounts);
     const [loading, setLoading] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -65,14 +68,16 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
 
     const loadData = async () => {
         setLoading(true);
-        const [cardTypesData, banksData, categoriesData] = await Promise.all([
+        const [cardTypesData, banksData, categoriesData, headAccountsData] = await Promise.all([
             getCardTypes(),
             getBanks(),
             getCategories(),
+            getHeadAccounts(),
         ]);
         setCardTypes(cardTypesData);
         setBanks(banksData);
         setCategories(categoriesData);
+        setHeadAccounts(headAccountsData);
         setLoading(false);
     };
 
@@ -113,6 +118,15 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
                 categoryId: "",
                 type: "",
             });
+        } else if (item.type === "headAccounts") {
+            const headAccount = headAccounts.find(h => h.id === item.id);
+            setFormData({
+                name: headAccount?.name || "",
+                icon: "",
+                color: "",
+                categoryId: "",
+                type: "",
+            });
         }
         setDialogOpen(true);
     };
@@ -142,6 +156,10 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
             result = editingItem.id
                 ? await updateCategory(editingItem.id, formData.name, formData.icon, formData.color)
                 : await addCategory(formData.name, formData.icon, formData.color);
+        } else if (editingItem.type === "headAccounts") {
+            result = editingItem.id
+                ? await updateHeadAccount(editingItem.id, formData.name)
+                : await addHeadAccount(formData.name);
         }
 
         if (result?.success) {
@@ -167,6 +185,8 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
             result = await deleteCategory(deleteItemId);
         } else if (deleteItemType === "subCategories") {
             result = await deleteSubCategory(deleteItemId);
+        } else if (deleteItemType === "headAccounts") {
+            result = await deleteHeadAccount(deleteItemId);
         }
 
         if (result?.success) {
@@ -220,6 +240,8 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
                 return "Category";
             case "subCategories":
                 return "Sub-Category";
+            case "headAccounts":
+                return "Head Account";
             default:
                 return "";
         }
@@ -239,12 +261,12 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
                     </Button>
                     <div>
                         <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Reference Data</h2>
-                        <p className="text-xs sm:text-sm text-muted-foreground">Manage card types, banks, categories, and sub-categories</p>
+                        <p className="text-xs sm:text-sm text-muted-foreground">Manage card types, banks, categories, sub-categories, and head accounts</p>
                     </div>
                 </div>
             </div>
 
-            <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
                 <Card>
                     <CardHeader className="pb-2">
                         <div className="flex items-center justify-between">
@@ -277,6 +299,45 @@ export function ReferenceDataManager({ initialCardTypes, initialBanks, initialCa
                                             <Edit2 className="h-3 w-3" />
                                         </Button>
                                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleDelete(ct.id, "cardTypes")}>
+                                            <Trash2 className="h-3 w-3 text-destructive" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <CardTitle className="flex items-center gap-1.5 text-sm sm:text-base">
+                                    <ClipboardList className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                    Head Accounts
+                                </CardTitle>
+                                <CardDescription className="text-xs">Manage head accounts</CardDescription>
+                            </div>
+                            <Button onClick={() => handleAddNew("headAccounts")} size="sm" className="h-6 sm:h-7 text-xs px-1.5 sm:px-2">
+                                <Plus className="h-3 w-3 mr-0.5 sm:mr-1" />
+                                Add
+                            </Button>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                        <div className="space-y-1 max-h-[250px] sm:max-h-[300px] overflow-y-auto">
+                            {headAccounts.map((account) => (
+                                <div key={account.id} className="flex items-center justify-between p-1.5 border rounded text-sm">
+                                    <span className="truncate flex-1">{account.name}</span>
+                                    <div className="flex gap-1">
+                                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleEdit({
+                                            id: account.id,
+                                            name: account.name,
+                                            type: "headAccounts",
+                                        })}>
+                                            <Edit2 className="h-3 w-3" />
+                                        </Button>
+                                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleDelete(account.id, "headAccounts")}>
                                             <Trash2 className="h-3 w-3 text-destructive" />
                                         </Button>
                                     </div>

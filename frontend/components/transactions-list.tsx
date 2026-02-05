@@ -7,9 +7,10 @@ interface TransactionsListProps {
     cards: Card[];
     categories: Category[];
     accounts: BankAccount[];
+    headAccounts: Array<{ id: string; name: string }>;
 }
 
-export function TransactionsList({ cards, categories, accounts }: TransactionsListProps) {
+export function TransactionsList({ cards, categories, accounts, headAccounts }: TransactionsListProps) {
     return (
         <div className="space-y-4">
             <TransactionsWorkbench
@@ -36,6 +37,7 @@ export function TransactionsList({ cards, categories, accounts }: TransactionsLi
                         categoryId: sub.categoryId || category.id,
                     })),
                 }))}
+                headAccounts={headAccounts}
             />
         </div>
     );
