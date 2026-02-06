@@ -99,6 +99,14 @@ enum UserRole {
   ADMIN
 }
 
+enum SecureRecordType {
+  BANK_ACCOUNT
+  OVERDRAFT
+  CREDIT_CARD
+  DEBIT_CARD
+  OTHER
+}
+
 model User {
   id               String                     @id @default(uuid())
   email            String                     @unique
@@ -121,6 +129,9 @@ model User {
   cardCredentials  CardCredential[]
   merchantRules    MerchantCategoryRule[]
   headAccounts     HeadAccount[]
+  secureVaultRecords SecureVaultRecord[]
+  userAccounts     UserAccount[]
+  userCards        UserCard[]
 }
 
 model EmailVerificationToken {
@@ -189,6 +200,8 @@ model BankAccount {
   updatedAt                DateTime                    @updatedAt
   transactions             BankTransaction[]
   credentials              BankAccountCredential?
+  linkedUserAccounts       UserAccount[]
+  linkedUserCards          UserCard[]
 
   @@unique([userId, providerAccountId])
 }
@@ -235,6 +248,83 @@ model BankTransactionMeta {
   comments           String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
+}
+
+model SecureVaultRecord {
+  id               String            @id @default(uuid())
+  userId           String
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recordType       SecureRecordType
+  label            String
+  bankName         String?
+  accountNumber    String?
+  sortCode         String?
+  cardLast4        String?
+  username         String?
+  status           String            @default("active")
+  encryptedPayload String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  userAccounts     UserAccount[]
+  userCards        UserCard[]
+}
+
+model UserAccount {
+  id                  String            @id @default(uuid())
+  userId              String
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label               String
+  bankName            String?
+  accountType         String            @default("bank")
+  accountNumber       String?
+  sortCode            String?
+  currency            String?
+  balance             Float?
+  limit               Float?
+  status              String            @default("active")
+  linkedBankAccountId String?
+  linkedBankAccount   BankAccount?      @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
+  secureRecordId      String?
+  secureRecord        SecureVaultRecord? @relation(fields: [secureRecordId], references: [id], onDelete: SetNull)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  cards               UserAccountCard[]
+}
+
+model UserCard {
+  id                  String            @id @default(uuid())
+  userId              String
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardType            String            @default("credit")
+  label               String
+  issuerBankName      String?
+  network             String?
+  last4               String?
+  statementDay        Int?
+  dueDay              Int?
+  last3StatementDates String?
+  last3DueDates       String?
+  status              String            @default("active")
+  imageUrl            String?
+  linkedBankAccountId String?
+  linkedBankAccount   BankAccount?      @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
+  secureRecordId      String?
+  secureRecord        SecureVaultRecord? @relation(fields: [secureRecordId], references: [id], onDelete: SetNull)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  accounts            UserAccountCard[]
+}
+
+model UserAccountCard {
+  id             String     @id @default(uuid())
+  userAccountId  String
+  userAccount    UserAccount @relation(fields: [userAccountId], references: [id], onDelete: Cascade)
+  userCardId     String
+  userCard       UserCard   @relation(fields: [userCardId], references: [id], onDelete: Cascade)
+  relationType   String?    // "primary", "addon", "debit_linked", etc
+  createdAt      DateTime   @default(now())
+
+  @@unique([userAccountId, userCardId])
 }
 
 model BankAccountCredential {

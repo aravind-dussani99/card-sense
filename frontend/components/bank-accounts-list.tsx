@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Landmark, Trash2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -34,19 +34,28 @@ type BankAccountDisplay = {
 export function BankAccountsList({
     bankAccounts,
     context = "bank",
+    deleteEndpoint,
+    showViewDialog = true,
 }: {
     bankAccounts: BankAccountDisplay[];
     context?: "bank" | "overdraft" | "card";
+    deleteEndpoint?: string;
+    showViewDialog?: boolean;
 }) {
     const [list, setList] = useState(bankAccounts);
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [loadingId, setLoadingId] = useState<string | null>(null);
 
+    useEffect(() => {
+        setList(bankAccounts);
+    }, [bankAccounts]);
+
     const deleteAccount = async (id: string, label: string) => {
         setLoadingId(id);
         setFeedback(null);
         try {
-            await apiFetch(`/api/bank/accounts/${id}`, { method: "DELETE", skipJson: true });
+            const base = deleteEndpoint || "/api/bank/accounts";
+            await apiFetch(`${base}/${id}`, { method: "DELETE", skipJson: true });
             setList((prev) => prev.filter((acct) => acct.id !== id));
             setFeedback({ type: "success", message: `${label} removed.` });
         } catch (err) {
@@ -157,7 +166,7 @@ export function BankAccountsList({
                             <div className="flex items-start justify-between gap-2">
                                 <div className="text-base font-semibold">{label}</div>
                                 <div className="flex gap-2">
-                                    <ViewAccountDialog account={acct} triggerVariant="icon" />
+                                    {showViewDialog && <ViewAccountDialog account={acct} triggerVariant="icon" />}
                                     <Button
                                         variant="outline"
                                         size="icon"

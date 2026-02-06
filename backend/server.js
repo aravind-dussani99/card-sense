@@ -898,6 +898,517 @@ app.delete("/api/banks/:id", async (req, res) => {
   }
 });
 
+app.get("/api/secure-vault", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const records = await prisma.secureVaultRecord.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(records);
+  } catch (error) {
+    console.error("Failed to fetch secure vault records:", error);
+    res.status(500).json({ error: "Failed to fetch secure vault records" });
+  }
+});
+
+app.post("/api/secure-vault", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const payload = req.body || {};
+    if (!payload.recordType || !payload.label || !payload.encryptedPayload) {
+      res.status(400).json({ error: "recordType, label, and encryptedPayload are required" });
+      return;
+    }
+    const record = await prisma.secureVaultRecord.create({
+      data: {
+        userId,
+        recordType: payload.recordType,
+        label: String(payload.label),
+        bankName: typeof payload.bankName === "string" ? payload.bankName : null,
+        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : null,
+        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : null,
+        cardLast4: typeof payload.cardLast4 === "string" ? payload.cardLast4 : null,
+        username: typeof payload.username === "string" ? payload.username : null,
+        status: typeof payload.status === "string" ? payload.status : "active",
+        encryptedPayload: String(payload.encryptedPayload),
+      },
+    });
+    res.status(201).json(record);
+  } catch (error) {
+    console.error("Failed to create secure vault record:", error);
+    res.status(500).json({ error: "Failed to create secure vault record" });
+  }
+});
+
+app.get("/api/secure-vault/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const record = await prisma.secureVaultRecord.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!record) {
+      res.status(404).json({ error: "Record not found" });
+      return;
+    }
+    res.json(record);
+  } catch (error) {
+    console.error("Failed to fetch secure vault record:", error);
+    res.status(500).json({ error: "Failed to fetch secure vault record" });
+  }
+});
+
+app.put("/api/secure-vault/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const payload = req.body || {};
+    const existing = await prisma.secureVaultRecord.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Record not found" });
+      return;
+    }
+    const updated = await prisma.secureVaultRecord.update({
+      where: { id: existing.id },
+      data: {
+        recordType: payload.recordType || existing.recordType,
+        label: typeof payload.label === "string" ? payload.label : existing.label,
+        bankName: typeof payload.bankName === "string" ? payload.bankName : existing.bankName,
+        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : existing.accountNumber,
+        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : existing.sortCode,
+        cardLast4: typeof payload.cardLast4 === "string" ? payload.cardLast4 : existing.cardLast4,
+        username: typeof payload.username === "string" ? payload.username : existing.username,
+        status: typeof payload.status === "string" ? payload.status : existing.status,
+        encryptedPayload: typeof payload.encryptedPayload === "string" ? payload.encryptedPayload : existing.encryptedPayload,
+      },
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error("Failed to update secure vault record:", error);
+    res.status(500).json({ error: "Failed to update secure vault record" });
+  }
+});
+
+app.delete("/api/secure-vault/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const existing = await prisma.secureVaultRecord.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Record not found" });
+      return;
+    }
+    await prisma.secureVaultRecord.delete({ where: { id: existing.id } });
+    res.status(204).send();
+  } catch (error) {
+    console.error("Failed to delete secure vault record:", error);
+    res.status(500).json({ error: "Failed to delete secure vault record" });
+  }
+});
+
+app.get("/api/user-accounts", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const accounts = await prisma.userAccount.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      include: { secureRecord: true, linkedBankAccount: true },
+    });
+    res.json(accounts);
+  } catch (error) {
+    console.error("Failed to fetch user accounts:", error);
+    res.status(500).json({ error: "Failed to fetch user accounts" });
+  }
+});
+
+app.post("/api/user-accounts", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const payload = req.body || {};
+    if (!payload.label) {
+      res.status(400).json({ error: "label is required" });
+      return;
+    }
+    let linkedBankAccountId = null;
+    if (typeof payload.linkedBankAccountId === "string") {
+      const bankAccount = await prisma.bankAccount.findFirst({
+        where: { id: payload.linkedBankAccountId, userId },
+      });
+      if (!bankAccount) {
+        res.status(404).json({ error: "Bank account not found" });
+        return;
+      }
+      linkedBankAccountId = bankAccount.id;
+    }
+    let secureRecordId = null;
+    if (typeof payload.secureRecordId === "string") {
+      const record = await prisma.secureVaultRecord.findFirst({
+        where: { id: payload.secureRecordId, userId },
+      });
+      if (!record) {
+        res.status(404).json({ error: "Secure record not found" });
+        return;
+      }
+      secureRecordId = record.id;
+    }
+    const account = await prisma.userAccount.create({
+      data: {
+        userId,
+        label: String(payload.label),
+        bankName: typeof payload.bankName === "string" ? payload.bankName : null,
+        accountType: typeof payload.accountType === "string" ? payload.accountType : "bank",
+        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : null,
+        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : null,
+        currency: typeof payload.currency === "string" ? payload.currency : null,
+        balance: typeof payload.balance === "number" ? payload.balance : payload.balance ? Number(payload.balance) : null,
+        limit: typeof payload.limit === "number" ? payload.limit : payload.limit ? Number(payload.limit) : null,
+        status: typeof payload.status === "string" ? payload.status : "active",
+        linkedBankAccountId,
+        secureRecordId,
+      },
+    });
+    res.status(201).json(account);
+  } catch (error) {
+    console.error("Failed to create user account:", error);
+    res.status(500).json({ error: "Failed to create user account" });
+  }
+});
+
+app.get("/api/user-accounts/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const account = await prisma.userAccount.findFirst({
+      where: { id: req.params.id, userId },
+      include: { secureRecord: true, linkedBankAccount: true, cards: true },
+    });
+    if (!account) {
+      res.status(404).json({ error: "Account not found" });
+      return;
+    }
+    res.json(account);
+  } catch (error) {
+    console.error("Failed to fetch user account:", error);
+    res.status(500).json({ error: "Failed to fetch user account" });
+  }
+});
+
+app.put("/api/user-accounts/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const payload = req.body || {};
+    const existing = await prisma.userAccount.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Account not found" });
+      return;
+    }
+    let linkedBankAccountId = existing.linkedBankAccountId || null;
+    if (payload.linkedBankAccountId === null) {
+      linkedBankAccountId = null;
+    } else if (typeof payload.linkedBankAccountId === "string") {
+      const bankAccount = await prisma.bankAccount.findFirst({
+        where: { id: payload.linkedBankAccountId, userId },
+      });
+      if (!bankAccount) {
+        res.status(404).json({ error: "Bank account not found" });
+        return;
+      }
+      linkedBankAccountId = bankAccount.id;
+    }
+    let secureRecordId = existing.secureRecordId || null;
+    if (payload.secureRecordId === null) {
+      secureRecordId = null;
+    } else if (typeof payload.secureRecordId === "string") {
+      const record = await prisma.secureVaultRecord.findFirst({
+        where: { id: payload.secureRecordId, userId },
+      });
+      if (!record) {
+        res.status(404).json({ error: "Secure record not found" });
+        return;
+      }
+      secureRecordId = record.id;
+    }
+    const updated = await prisma.userAccount.update({
+      where: { id: existing.id },
+      data: {
+        label: typeof payload.label === "string" ? payload.label : existing.label,
+        bankName: typeof payload.bankName === "string" ? payload.bankName : existing.bankName,
+        accountType: typeof payload.accountType === "string" ? payload.accountType : existing.accountType,
+        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : existing.accountNumber,
+        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : existing.sortCode,
+        currency: typeof payload.currency === "string" ? payload.currency : existing.currency,
+        balance: payload.balance !== undefined ? Number(payload.balance) : existing.balance,
+        limit: payload.limit !== undefined ? Number(payload.limit) : existing.limit,
+        status: typeof payload.status === "string" ? payload.status : existing.status,
+        linkedBankAccountId,
+        secureRecordId,
+      },
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error("Failed to update user account:", error);
+    res.status(500).json({ error: "Failed to update user account" });
+  }
+});
+
+app.delete("/api/user-accounts/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const existing = await prisma.userAccount.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Account not found" });
+      return;
+    }
+    await prisma.userAccount.delete({ where: { id: existing.id } });
+    res.status(204).send();
+  } catch (error) {
+    console.error("Failed to delete user account:", error);
+    res.status(500).json({ error: "Failed to delete user account" });
+  }
+});
+
+app.get("/api/user-cards", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const cards = await prisma.userCard.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      include: { secureRecord: true, linkedBankAccount: true },
+    });
+    res.json(cards);
+  } catch (error) {
+    console.error("Failed to fetch user cards:", error);
+    res.status(500).json({ error: "Failed to fetch user cards" });
+  }
+});
+
+app.post("/api/user-cards", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const payload = req.body || {};
+    if (!payload.label) {
+      res.status(400).json({ error: "label is required" });
+      return;
+    }
+    let linkedBankAccountId = null;
+    if (typeof payload.linkedBankAccountId === "string") {
+      const bankAccount = await prisma.bankAccount.findFirst({
+        where: { id: payload.linkedBankAccountId, userId },
+      });
+      if (!bankAccount) {
+        res.status(404).json({ error: "Bank account not found" });
+        return;
+      }
+      linkedBankAccountId = bankAccount.id;
+    }
+    let secureRecordId = null;
+    if (typeof payload.secureRecordId === "string") {
+      const record = await prisma.secureVaultRecord.findFirst({
+        where: { id: payload.secureRecordId, userId },
+      });
+      if (!record) {
+        res.status(404).json({ error: "Secure record not found" });
+        return;
+      }
+      secureRecordId = record.id;
+    }
+    const card = await prisma.userCard.create({
+      data: {
+        userId,
+        cardType: typeof payload.cardType === "string" ? payload.cardType : "credit",
+        label: String(payload.label),
+        issuerBankName: typeof payload.issuerBankName === "string" ? payload.issuerBankName : null,
+        network: typeof payload.network === "string" ? payload.network : null,
+        last4: typeof payload.last4 === "string" ? payload.last4 : null,
+        statementDay: typeof payload.statementDay === "number" ? payload.statementDay : payload.statementDay ? Number(payload.statementDay) : null,
+        dueDay: typeof payload.dueDay === "number" ? payload.dueDay : payload.dueDay ? Number(payload.dueDay) : null,
+        last3StatementDates: typeof payload.last3StatementDates === "string" ? payload.last3StatementDates : null,
+        last3DueDates: typeof payload.last3DueDates === "string" ? payload.last3DueDates : null,
+        status: typeof payload.status === "string" ? payload.status : "active",
+        imageUrl: typeof payload.imageUrl === "string" ? payload.imageUrl : null,
+        linkedBankAccountId,
+        secureRecordId,
+      },
+    });
+    res.status(201).json(card);
+  } catch (error) {
+    console.error("Failed to create user card:", error);
+    res.status(500).json({ error: "Failed to create user card" });
+  }
+});
+
+app.get("/api/user-cards/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const card = await prisma.userCard.findFirst({
+      where: { id: req.params.id, userId },
+      include: { secureRecord: true, linkedBankAccount: true, accounts: true },
+    });
+    if (!card) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
+    res.json(card);
+  } catch (error) {
+    console.error("Failed to fetch user card:", error);
+    res.status(500).json({ error: "Failed to fetch user card" });
+  }
+});
+
+app.put("/api/user-cards/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const payload = req.body || {};
+    const existing = await prisma.userCard.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
+    let linkedBankAccountId = existing.linkedBankAccountId || null;
+    if (payload.linkedBankAccountId === null) {
+      linkedBankAccountId = null;
+    } else if (typeof payload.linkedBankAccountId === "string") {
+      const bankAccount = await prisma.bankAccount.findFirst({
+        where: { id: payload.linkedBankAccountId, userId },
+      });
+      if (!bankAccount) {
+        res.status(404).json({ error: "Bank account not found" });
+        return;
+      }
+      linkedBankAccountId = bankAccount.id;
+    }
+    let secureRecordId = existing.secureRecordId || null;
+    if (payload.secureRecordId === null) {
+      secureRecordId = null;
+    } else if (typeof payload.secureRecordId === "string") {
+      const record = await prisma.secureVaultRecord.findFirst({
+        where: { id: payload.secureRecordId, userId },
+      });
+      if (!record) {
+        res.status(404).json({ error: "Secure record not found" });
+        return;
+      }
+      secureRecordId = record.id;
+    }
+    const updated = await prisma.userCard.update({
+      where: { id: existing.id },
+      data: {
+        cardType: typeof payload.cardType === "string" ? payload.cardType : existing.cardType,
+        label: typeof payload.label === "string" ? payload.label : existing.label,
+        issuerBankName: typeof payload.issuerBankName === "string" ? payload.issuerBankName : existing.issuerBankName,
+        network: typeof payload.network === "string" ? payload.network : existing.network,
+        last4: typeof payload.last4 === "string" ? payload.last4 : existing.last4,
+        statementDay: payload.statementDay !== undefined ? Number(payload.statementDay) : existing.statementDay,
+        dueDay: payload.dueDay !== undefined ? Number(payload.dueDay) : existing.dueDay,
+        last3StatementDates: typeof payload.last3StatementDates === "string" ? payload.last3StatementDates : existing.last3StatementDates,
+        last3DueDates: typeof payload.last3DueDates === "string" ? payload.last3DueDates : existing.last3DueDates,
+        status: typeof payload.status === "string" ? payload.status : existing.status,
+        imageUrl: typeof payload.imageUrl === "string" ? payload.imageUrl : existing.imageUrl,
+        linkedBankAccountId,
+        secureRecordId,
+      },
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error("Failed to update user card:", error);
+    res.status(500).json({ error: "Failed to update user card" });
+  }
+});
+
+app.delete("/api/user-cards/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const existing = await prisma.userCard.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
+    await prisma.userCard.delete({ where: { id: existing.id } });
+    res.status(204).send();
+  } catch (error) {
+    console.error("Failed to delete user card:", error);
+    res.status(500).json({ error: "Failed to delete user card" });
+  }
+});
+
+app.get("/api/user-account-cards", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const links = await prisma.userAccountCard.findMany({
+      where: { userAccount: { userId } },
+      include: { userAccount: true, userCard: true },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(links);
+  } catch (error) {
+    console.error("Failed to fetch user account cards:", error);
+    res.status(500).json({ error: "Failed to fetch user account cards" });
+  }
+});
+
+app.post("/api/user-account-cards", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const payload = req.body || {};
+    if (!payload.userAccountId || !payload.userCardId) {
+      res.status(400).json({ error: "userAccountId and userCardId are required" });
+      return;
+    }
+    const account = await prisma.userAccount.findFirst({
+      where: { id: payload.userAccountId, userId },
+    });
+    if (!account) {
+      res.status(404).json({ error: "Account not found" });
+      return;
+    }
+    const card = await prisma.userCard.findFirst({
+      where: { id: payload.userCardId, userId },
+    });
+    if (!card) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
+    const link = await prisma.userAccountCard.create({
+      data: {
+        userAccountId: account.id,
+        userCardId: card.id,
+        relationType: typeof payload.relationType === "string" ? payload.relationType : null,
+      },
+    });
+    res.status(201).json(link);
+  } catch (error) {
+    console.error("Failed to create user account card link:", error);
+    res.status(500).json({ error: "Failed to create user account card link" });
+  }
+});
+
+app.delete("/api/user-account-cards/:id", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const existing = await prisma.userAccountCard.findFirst({
+      where: { id: req.params.id, userAccount: { userId } },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Link not found" });
+      return;
+    }
+    await prisma.userAccountCard.delete({ where: { id: existing.id } });
+    res.status(204).send();
+  } catch (error) {
+    console.error("Failed to delete user account card link:", error);
+    res.status(500).json({ error: "Failed to delete user account card link" });
+  }
+});
+
 app.get("/api/card-types", async (_req, res) => {
   try {
     const cardTypes = await prisma.cardType.findMany({ orderBy: { name: "asc" } });

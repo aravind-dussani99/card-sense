@@ -126,6 +126,67 @@ export type BankTransaction = {
   meta?: BankTransactionMeta | null;
 };
 
+export type SecureRecordType = "BANK_ACCOUNT" | "OVERDRAFT" | "CREDIT_CARD" | "DEBIT_CARD" | "OTHER";
+
+export type SecureVaultRecord = {
+  id: string;
+  recordType: SecureRecordType;
+  label: string;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  sortCode?: string | null;
+  cardLast4?: string | null;
+  username?: string | null;
+  status?: string | null;
+  encryptedPayload: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type UserAccount = {
+  id: string;
+  label: string;
+  bankName?: string | null;
+  accountType?: string | null;
+  accountNumber?: string | null;
+  sortCode?: string | null;
+  currency?: string | null;
+  balance?: number | null;
+  limit?: number | null;
+  status?: string | null;
+  linkedBankAccountId?: string | null;
+  secureRecordId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type UserCard = {
+  id: string;
+  cardType?: string | null;
+  label: string;
+  issuerBankName?: string | null;
+  network?: string | null;
+  last4?: string | null;
+  statementDay?: number | null;
+  dueDay?: number | null;
+  last3StatementDates?: string | null;
+  last3DueDates?: string | null;
+  status?: string | null;
+  imageUrl?: string | null;
+  linkedBankAccountId?: string | null;
+  secureRecordId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type UserAccountCard = {
+  id: string;
+  userAccountId: string;
+  userCardId: string;
+  relationType?: string | null;
+  createdAt?: string;
+};
+
 export type AnalyticsValuePoint = {
   name: string;
   value: number;

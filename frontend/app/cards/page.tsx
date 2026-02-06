@@ -3,7 +3,9 @@ import { MainNav } from "@/components/main-nav"
 import { AuthMenu } from "@/components/auth-menu"
 import { getCards } from "@/app/actions/card-actions"
 import { getBankAccounts } from "@/app/actions/bank-actions"
-import { BankAccount, Card } from "@/lib/types"
+import { getUserAccounts } from "@/app/actions/user-account-actions"
+import { getUserCards } from "@/app/actions/user-card-actions"
+import { BankAccount, Card, UserAccount, UserCard } from "@/lib/types"
 import { AccountsHubContent } from "@/components/accounts-hub-content"
 
 export const metadata: Metadata = {
@@ -16,6 +18,10 @@ export const dynamic = "force-dynamic";
 export default async function CardsPage() {
     const cards: Card[] = await getCards();
     const bankAccounts: BankAccount[] = await getBankAccounts();
+    const [userAccounts, userCards]: [UserAccount[], UserCard[]] = await Promise.all([
+        getUserAccounts(),
+        getUserCards(),
+    ]);
 
     return (
         <div className="flex flex-col min-h-screen">
@@ -28,7 +34,12 @@ export default async function CardsPage() {
                     </div>
                 </div>
             </div>
-            <AccountsHubContent cards={cards} bankAccounts={bankAccounts} />
+            <AccountsHubContent
+                cards={cards}
+                bankAccounts={bankAccounts}
+                userAccounts={userAccounts}
+                userCards={userCards}
+            />
         </div>
     )
 }
