@@ -7,8 +7,6 @@ import { Button } from "@/components/ui/button"
 import { Bell, CreditCard, Database, Settings2, ArrowRight, Info } from "lucide-react"
 import Link from "next/link"
 import { BankConnect } from "@/components/bank-connect"
-import { BankCredentialsManager } from "@/components/bank-credentials-manager"
-import { CardCredentialsManager } from "@/components/card-credentials-manager"
 import { useSyncExternalStore, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { apiFetch } from "@/lib/api"
@@ -93,7 +91,7 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
                         Reference Data Management
                     </CardTitle>
                     <CardDescription>
-                        Manage all your reference data including card types, banks, categories, and sub-categories in one place.
+                        Manage head accounts, categories, and sub-categories in one place.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -315,8 +313,6 @@ export function SettingsContent({ connections = [] }: { connections?: BankConnec
             </Card>
 
             <BankConnect />
-            <BankCredentialsManager />
-            <CardCredentialsManager />
             {connections.length > 0 && (
             <Card>
                 <CardHeader>

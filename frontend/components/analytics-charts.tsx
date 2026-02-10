@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts"
+import { formatAmount } from "@/lib/utils";
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#FF1943', '#00D4FF', '#FF6B9D'];
 
@@ -19,7 +20,7 @@ export function AnalyticsCharts({ categoryData, monthlyData, cardData, merchantD
         return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
     };
 
-    const formatCurrency = (value: number) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const formatCurrency = (value: number) => formatAmount(value, { currency: "$" });
 
     if (categoryData.length === 0 && monthlyData.length === 0 && cardData.length === 0 && merchantData.length === 0) {
         return (
@@ -79,7 +80,7 @@ export function AnalyticsCharts({ categoryData, monthlyData, cardData, merchantD
                                     textAnchor="end"
                                     height={80}
                                 />
-                                <YAxis tickFormatter={(value) => `$${value.toLocaleString()}`} />
+                                <YAxis tickFormatter={(value) => formatAmount(value, { currency: "$" })} />
                                 <Tooltip formatter={formatCurrency} />
                                 <Bar dataKey="total" fill="#0088FE" />
                             </BarChart>
@@ -98,7 +99,7 @@ export function AnalyticsCharts({ categoryData, monthlyData, cardData, merchantD
                         <ResponsiveContainer width="100%" height={300}>
                             <BarChart data={cardData} layout="vertical">
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis type="number" tickFormatter={(value) => `$${value.toLocaleString()}`} />
+                                <XAxis type="number" tickFormatter={(value) => formatAmount(value, { currency: "$" })} />
                                 <YAxis dataKey="name" type="category" width={120} />
                                 <Tooltip formatter={formatCurrency} />
                                 <Bar dataKey="value" fill="#00C49F" />
@@ -118,7 +119,7 @@ export function AnalyticsCharts({ categoryData, monthlyData, cardData, merchantD
                         <ResponsiveContainer width="100%" height={320}>
                             <BarChart data={merchantData} layout="vertical">
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis type="number" tickFormatter={(value) => `$${value.toLocaleString()}`} />
+                                <XAxis type="number" tickFormatter={(value) => formatAmount(value, { currency: "$" })} />
                                 <YAxis dataKey="name" type="category" width={160} />
                                 <Tooltip formatter={formatCurrency} />
                                 <Bar dataKey="value" fill="#FF8042" />

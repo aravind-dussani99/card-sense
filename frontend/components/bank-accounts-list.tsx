@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { ViewAccountDialog } from "@/components/view-account-dialog";
+import { ViewAccountMetaDialog } from "@/components/view-account-meta-dialog";
+import { formatAmount } from "@/lib/utils";
 
 type BankAccountDisplay = {
     id: string;
@@ -29,18 +31,15 @@ type BankAccountDisplay = {
     balance?: number | null;
     availableBalance?: number | null;
     limit?: number | null;
+    source?: "bank" | "meta";
 };
 
 export function BankAccountsList({
     bankAccounts,
     context = "bank",
-    deleteEndpoint,
-    showViewDialog = true,
 }: {
     bankAccounts: BankAccountDisplay[];
     context?: "bank" | "overdraft" | "card";
-    deleteEndpoint?: string;
-    showViewDialog?: boolean;
 }) {
     const [list, setList] = useState(bankAccounts);
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -50,11 +49,11 @@ export function BankAccountsList({
         setList(bankAccounts);
     }, [bankAccounts]);
 
-    const deleteAccount = async (id: string, label: string) => {
+    const deleteAccount = async (id: string, label: string, source?: "bank" | "meta") => {
         setLoadingId(id);
         setFeedback(null);
         try {
-            const base = deleteEndpoint || "/api/bank/accounts";
+            const base = source === "meta" ? "/api/account-meta" : "/api/bank/accounts";
             await apiFetch(`${base}/${id}`, { method: "DELETE", skipJson: true });
             setList((prev) => prev.filter((acct) => acct.id !== id));
             setFeedback({ type: "success", message: `${label} removed.` });
@@ -129,7 +128,7 @@ export function BankAccountsList({
                         isOverdraft && limitValue !== null
                             ? overdraftRemaining
                             : bankBaseBalance ?? acct.availableBalance ?? acct.balance ?? null;
-                    const balanceText = balanceValue === null ? "—" : balanceValue.toFixed(2);
+                    const balanceText = formatAmount(balanceValue);
                     const cardMask = acct.mask || accountNumber.slice(-4) || "••••";
                     const accountRef = isCard
                         ? `Card •••• ${cardMask}`
@@ -163,20 +162,24 @@ export function BankAccountsList({
                                     {bankLabel}
                                 </span>
                             </div>
-                            <div className="flex items-start justify-between gap-2">
-                                <div className="text-base font-semibold">{label}</div>
-                                <div className="flex gap-2">
-                                    {showViewDialog && <ViewAccountDialog account={acct} triggerVariant="icon" />}
-                                    <Button
-                                        variant="outline"
-                                        size="icon"
-                                        className="h-8 w-8 rounded-full text-red-600 border-red-200 hover:bg-red-50"
-                                        disabled={loadingId === acct.id}
-                                        onClick={() => deleteAccount(acct.id, label)}
-                                        aria-label="Delete account"
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="text-base font-semibold">{label}</div>
+                                    <div className="flex gap-2">
+                                        {acct.source === "meta" ? (
+                                            <ViewAccountMetaDialog accountMetaId={acct.id} triggerVariant="icon" />
+                                        ) : (
+                                            <ViewAccountDialog account={acct} triggerVariant="icon" context={context} />
+                                        )}
+                                        <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className="h-8 w-8 rounded-full text-red-600 border-red-200 hover:bg-red-50"
+                                            disabled={loadingId === acct.id}
+                                            onClick={() => deleteAccount(acct.id, label, acct.source)}
+                                            aria-label="Delete account"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
                                 </div>
                             </div>
                             <div className="text-xs text-muted-foreground break-all">
@@ -196,18 +199,18 @@ export function BankAccountsList({
                                 <div className="text-xs text-muted-foreground space-y-1">
                                     {isOverdraft ? (
                                         <div className="flex flex-wrap gap-2">
-                                            <span>Limit: {limitValue.toFixed(2)}</span>
-                                            <span>Used: {overdraftUsed === null ? "—" : overdraftUsed.toFixed(2)}</span>
+                                            <span>Limit: {formatAmount(limitValue)}</span>
+                                            <span>Used: {formatAmount(overdraftUsed)}</span>
                                         </div>
                                     ) : (
                                         <>
                                             <div className="flex flex-wrap gap-2">
-                                                <span>{isCard ? "Credit limit" : "Limit"}: {limitValue.toFixed(2)}</span>
+                                                <span>{isCard ? "Credit limit" : "Limit"}: {formatAmount(limitValue)}</span>
                                                 {isCard && (
                                                     <span>
                                                         Used:{" "}
                                                         {typeof acct.availableBalance === "number"
-                                                            ? Math.max(0, limitValue - acct.availableBalance).toFixed(2)
+                                                            ? formatAmount(Math.max(0, limitValue - acct.availableBalance))
                                                             : "—"}
                                                     </span>
                                                 )}
@@ -219,11 +222,11 @@ export function BankAccountsList({
                             {isCard && (
                                 <div className="text-xs text-muted-foreground space-y-1">
                                     <div className="flex flex-wrap gap-2">
-                                        <span>Statement: {statementBalance === null ? "—" : statementBalance.toFixed(2)}</span>
-                                        <span>Paid: {statementPaid === null ? "—" : statementPaid.toFixed(2)}</span>
+                                        <span>Statement: {formatAmount(statementBalance)}</span>
+                                        <span>Paid: {formatAmount(statementPaid)}</span>
                                     </div>
                                     <div className="flex flex-wrap gap-2">
-                                        <span>Payable: {statementPayable === null ? "—" : statementPayable.toFixed(2)}</span>
+                                        <span>Payable: {formatAmount(statementPayable)}</span>
                                         <span>
                                             Due in:{" "}
                                             {acct.statementDueInDays !== null && acct.statementDueInDays !== undefined

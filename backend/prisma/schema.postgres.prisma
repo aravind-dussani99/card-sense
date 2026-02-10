@@ -7,38 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Card {
-  id                       String                      @id @default(uuid())
-  userId                   String
-  user                     User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name                     String
-  nameOnCard               String? // Name printed on the card
-  bank                     String
-  bankId                   String?
-  bankRef                  Bank?                       @relation(fields: [bankId], references: [id], onDelete: SetNull)
-  cardTypeId               String? // Network (Visa, Mastercard, Amex)
-  cardType                 CardType?                   @relation(fields: [cardTypeId], references: [id], onDelete: SetNull)
-  cardCategory             String? // Card type/category (Rupay, PhonePe, IndianOil, Rewards, Amazon, etc.)
-  productCode              String?
-  planName                 String?
-  benefitsJson             String?
-  tags                     String?
-  last4                    String
-  fullCardNumber           String? // Full card number (encrypted/hidden)
-  expiryDate               String? // Format: "MM/YY" or "10/29"
-  cvv                      String? // CVV (encrypted/hidden)
-  statementPassword        String? // Password for encrypted statement PDFs
-  limit                    Float
-  balance                  Float                       @default(0)
-  cutoffDate               Int
-  dueDate                  Int
-  last3DueDates            String? // JSON array of last 3 due dates for prediction
-  color                    String                      @default("bg-gray-800")
-  createdAt                DateTime                    @default(now())
-  updatedAt                DateTime                    @updatedAt
-  credential               CardCredential?
-}
-
 model Category {
   id                        String                      @id @default(uuid())
   userId                    String?
@@ -73,37 +41,19 @@ model HeadAccount {
   @@unique([userId, name])
 }
 
-model CardType {
-  id        String   @id @default(uuid())
-  name      String   @unique // This IS the network (e.g., "Mastercard", "Visa", "American Express")
-  icon      String?
-  color     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  cards     Card[]
-}
-
-model Bank {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  icon      String?
-  color     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  cards     Card[]
-}
-
 
 enum UserRole {
   USER
   ADMIN
 }
 
-enum SecureRecordType {
+enum AccountType {
   BANK_ACCOUNT
   OVERDRAFT
   CREDIT_CARD
   DEBIT_CARD
+  CASH_ACCOUNT
+  CASH_CARD
   OTHER
 }
 
@@ -119,19 +69,15 @@ model User {
   updatedAt        DateTime                   @updatedAt
   emailTokens      EmailVerificationToken[]
   passwordTokens   PasswordResetToken[]
-  cards            Card[]
   categories       Category[]
   bankConnections  BankConnection[]
   bankAccounts     BankAccount[]
   bankTransactions BankTransaction[]
   bankTransactionMeta BankTransactionMeta[]
-  bankAccountCredentials BankAccountCredential[]
-  cardCredentials  CardCredential[]
   merchantRules    MerchantCategoryRule[]
   headAccounts     HeadAccount[]
-  secureVaultRecords SecureVaultRecord[]
-  userAccounts     UserAccount[]
-  userCards        UserCard[]
+  accountMetas     AccountMeta[]
+  sensitiveInfos   SensitiveInfo[]
 }
 
 model EmailVerificationToken {
@@ -199,9 +145,7 @@ model BankAccount {
   createdAt                DateTime                    @default(now())
   updatedAt                DateTime                    @updatedAt
   transactions             BankTransaction[]
-  credentials              BankAccountCredential?
-  linkedUserAccounts       UserAccount[]
-  linkedUserCards          UserCard[]
+  accountMetas             AccountMeta[]
 
   @@unique([userId, providerAccountId])
 }
@@ -250,93 +194,49 @@ model BankTransactionMeta {
   updatedAt          DateTime        @updatedAt
 }
 
-model SecureVaultRecord {
-  id               String            @id @default(uuid())
-  userId           String
-  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  recordType       SecureRecordType
-  label            String
-  bankName         String?
-  accountNumber    String?
-  sortCode         String?
-  cardLast4        String?
-  username         String?
-  status           String            @default("active")
-  encryptedPayload String
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  userAccounts     UserAccount[]
-  userCards        UserCard[]
-}
-
-model UserAccount {
-  id                  String            @id @default(uuid())
+model AccountMeta {
+  id                  String          @id @default(uuid())
   userId              String
-  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedBankAccountId String?
+  linkedBankAccount   BankAccount?    @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
+  parentAccountId     String?
+  parentAccount       AccountMeta?    @relation("AccountMetaParent", fields: [parentAccountId], references: [id], onDelete: SetNull)
+  childAccounts       AccountMeta[]   @relation("AccountMetaParent")
+  accountType         AccountType
   label               String
+  accountHolderName   String?
   bankName            String?
-  accountType         String            @default("bank")
+  currency            String?
+  internationalAccountNumber String?
   accountNumber       String?
   sortCode            String?
-  currency            String?
   balance             Float?
+  availableBalance    Float?
   limit               Float?
-  status              String            @default("active")
-  linkedBankAccountId String?
-  linkedBankAccount   BankAccount?      @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
-  secureRecordId      String?
-  secureRecord        SecureVaultRecord? @relation(fields: [secureRecordId], references: [id], onDelete: SetNull)
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  cards               UserAccountCard[]
-}
-
-model UserCard {
-  id                  String            @id @default(uuid())
-  userId              String
-  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cardType            String            @default("credit")
-  label               String
-  issuerBankName      String?
-  network             String?
-  last4               String?
+  cardNetwork         String?
+  cardLast4           String?
+  cardImageUrl        String?
+  documentImageUrls   String[]
   statementDay        Int?
   dueDay              Int?
   last3StatementDates String?
   last3DueDates       String?
-  status              String            @default("active")
-  imageUrl            String?
-  linkedBankAccountId String?
-  linkedBankAccount   BankAccount?      @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
-  secureRecordId      String?
-  secureRecord        SecureVaultRecord? @relation(fields: [secureRecordId], references: [id], onDelete: SetNull)
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  accounts            UserAccountCard[]
+  status              String          @default("active")
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  sensitiveInfos      SensitiveInfo[]
 }
 
-model UserAccountCard {
-  id             String     @id @default(uuid())
-  userAccountId  String
-  userAccount    UserAccount @relation(fields: [userAccountId], references: [id], onDelete: Cascade)
-  userCardId     String
-  userCard       UserCard   @relation(fields: [userCardId], references: [id], onDelete: Cascade)
-  relationType   String?    // "primary", "addon", "debit_linked", etc
-  createdAt      DateTime   @default(now())
-
-  @@unique([userAccountId, userCardId])
-}
-
-model BankAccountCredential {
-  id               String       @id @default(uuid())
+model SensitiveInfo {
+  id               String      @id @default(uuid())
   userId           String
-  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bankAccountId    String       @unique
-  bankAccount      BankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
-  label            String?
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountMetaId    String
+  accountMeta      AccountMeta @relation(fields: [accountMetaId], references: [id], onDelete: Cascade)
   encryptedPayload String
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 }
 
 model MerchantCategoryRule {
@@ -350,16 +250,4 @@ model MerchantCategoryRule {
   updatedAt   DateTime @updatedAt
 
   @@unique([userId, merchantKey])
-}
-
-model CardCredential {
-  id               String   @id @default(uuid())
-  userId           String
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cardId           String   @unique
-  card             Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  label            String?
-  encryptedPayload String
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
 }

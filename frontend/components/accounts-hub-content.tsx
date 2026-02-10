@@ -1,24 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { AddAccountDialog } from "@/components/add-account-dialog";
 import { AddCardDialog } from "@/components/add-card-dialog";
 import { BankAccountsList } from "@/components/bank-accounts-list";
 import { CardDisplay } from "@/components/card-display";
-import { EditCardDialog } from "@/components/edit-card-dialog";
+import { ViewAccountMetaDialog } from "@/components/view-account-meta-dialog";
 import { DashboardKpis } from "@/components/dashboard-kpis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CreditCard as CardIcon, Eye, EyeOff } from "lucide-react";
-import { BankAccount, Card as CardModel, UserAccount, UserCard } from "@/lib/types";
+import { AccountMeta, BankAccount } from "@/lib/types";
 import { useBalanceVisibility } from "@/lib/balance-visibility";
 
 interface AccountsHubContentProps {
-    cards: CardModel[];
     bankAccounts: BankAccount[];
-    userAccounts: UserAccount[];
-    userCards: UserCard[];
+    accountMetas: AccountMeta[];
 }
 
 const toNumber = (value?: number | null) => (typeof value === "number" ? value : 0);
@@ -40,77 +37,108 @@ const PlaceholderTile = ({ label }: { label: string }) => (
     </div>
 );
 
-export function AccountsHubContent({ cards, bankAccounts, userAccounts, userCards }: AccountsHubContentProps) {
-    const [dataSource, setDataSource] = useState<"legacy" | "secure">("legacy");
+export function AccountsHubContent({ bankAccounts, accountMetas }: AccountsHubContentProps) {
     const secureAccounts = useMemo(
         () =>
-            userAccounts.map((acct) => ({
-                id: acct.id,
-                name: acct.label,
-                type: acct.accountType || "bank",
-                currency: acct.currency || null,
-                providerAccountId: null,
-                mask: acct.accountNumber ? acct.accountNumber.slice(-4) : null,
-                accountNumber: acct.accountNumber || null,
-                sortCode: acct.sortCode || null,
-                balance: acct.balance ?? null,
-                availableBalance: acct.balance ?? null,
-                limit: acct.limit ?? null,
-                tags: acct.bankName ? `bank:${acct.bankName}` : null,
-            })),
-        [userAccounts]
+            accountMetas
+                .filter(
+                    (acct) =>
+                        !acct.linkedBankAccountId &&
+                        ["BANK_ACCOUNT", "OVERDRAFT", "CASH_ACCOUNT"].includes(acct.accountType)
+                )
+                .map((acct) => ({
+                    id: acct.id,
+                    name: acct.label,
+                    type: acct.accountType.toLowerCase(),
+                    currency: acct.currency || null,
+                    providerAccountId: null,
+                    mask: acct.accountNumber ? acct.accountNumber.slice(-4) : null,
+                    accountNumber: acct.accountNumber || null,
+                    sortCode: acct.sortCode || null,
+                    balance: acct.balance ?? null,
+                    availableBalance: acct.availableBalance ?? null,
+                    limit: acct.limit ?? null,
+                    tags: acct.bankName ? `bank:${acct.bankName}` : null,
+                    source: "meta" as const,
+                })),
+        [accountMetas]
     );
-    const activeBankAccounts = dataSource === "secure" ? secureAccounts : bankAccounts;
+    const mergedBankAccounts = useMemo(
+        () => [
+            ...bankAccounts.map((acct) => ({ ...acct, source: "bank" as const })),
+            ...secureAccounts,
+        ],
+        [bankAccounts, secureAccounts]
+    );
     const overdraftAccounts = useMemo(
         () =>
-            activeBankAccounts.filter((acct) => {
+            mergedBankAccounts.filter((acct) => {
                 const type = (acct.type || "").toLowerCase();
-                if (dataSource === "secure") return type.includes("overdraft");
                 return (acct.limit ?? 0) > 0 && !((acct.type || "").toLowerCase().includes("card") || (acct.type || "").toLowerCase().includes("credit"));
             }),
-        [activeBankAccounts, dataSource]
+        [mergedBankAccounts]
     );
     const cardAccounts = useMemo(
         () =>
-            activeBankAccounts.filter((acct) => {
+            bankAccounts.filter((acct) => {
                 const type = (acct.type || "").toLowerCase();
                 return type.includes("card") || type.includes("credit");
             }),
-        [activeBankAccounts]
+        [bankAccounts]
     );
     const standardAccounts = useMemo(
         () =>
-            activeBankAccounts.filter((acct) => {
+            mergedBankAccounts.filter((acct) => {
                 const type = (acct.type || "").toLowerCase();
-                return !type.includes("card") && !type.includes("credit") && (dataSource === "secure" ? !type.includes("overdraft") : true);
+                return !type.includes("card") && !type.includes("credit") && !type.includes("overdraft");
             }),
-        [activeBankAccounts, dataSource]
+        [mergedBankAccounts]
     );
     const secureCardDisplays = useMemo(
         () =>
-            userCards.map((card) => ({
-                id: card.id,
-                name: card.label,
-                nameOnCard: null,
-                bank: card.issuerBankName || "Bank",
-                cardType: card.network ? { name: card.network } : null,
-                cardCategory: null,
-                last4: card.last4 || "••••",
-                fullCardNumber: null,
-                expiryDate: null,
-                cvv: null,
-                limit: 0,
-                balance: 0,
-                cutoffDate: card.statementDay || 1,
-                dueDate: card.dueDay || 1,
-                color: "bg-gray-800",
-                last3DueDates: card.last3DueDates || null,
-            })),
-        [userCards]
+            accountMetas
+                .filter(
+                    (card) =>
+                        !card.linkedBankAccountId &&
+                        ["CREDIT_CARD", "DEBIT_CARD", "CASH_CARD"].includes(card.accountType)
+                )
+                .map((card) => ({
+                    id: card.id,
+                    name: card.label,
+                    nameOnCard: null,
+                    bank: card.bankName || "Bank",
+                    cardType: card.cardNetwork ? { name: card.cardNetwork } : null,
+                    cardCategory: null,
+                    last4: card.cardLast4 || "••••",
+                    fullCardNumber: null,
+                    expiryDate: null,
+                    cvv: null,
+                    limit: typeof card.limit === "number" ? card.limit : 0,
+                    balance: typeof card.balance === "number" ? card.balance : 0,
+                    cutoffDate: card.statementDay || 1,
+                    dueDate: card.dueDay || 1,
+                    color: "bg-gray-800",
+                    last3DueDates: card.last3DueDates || null,
+                })),
+        [accountMetas]
     );
     const [showBank, setShowBank] = useState(true);
     const [showOverdraft, setShowOverdraft] = useState(true);
     const [showCredit, setShowCredit] = useState(true);
+    const focusSection = (id: string) => {
+        if (typeof window === "undefined") return;
+        requestAnimationFrame(() => {
+            document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+    };
+    const selectSection = (section: "bank" | "overdraft" | "credit") => {
+        setShowBank(section === "bank");
+        setShowOverdraft(section === "overdraft");
+        setShowCredit(section === "credit");
+        if (section === "bank") focusSection("bank-accounts");
+        if (section === "overdraft") focusSection("overdraft-accounts");
+        if (section === "credit") focusSection("credit-cards");
+    };
 
     const bankAvailable = standardAccounts.reduce((sum, acct) => {
         const limit = typeof acct.limit === "number" ? acct.limit : 0;
@@ -140,8 +168,8 @@ export function AccountsHubContent({ cards, bankAccounts, userAccounts, userCard
         if (typeof acct.balance === "number") return sum + Math.max(0, acct.balance);
         return sum;
     }, 0);
-    const manualCardLimit = dataSource === "secure" ? 0 : cards.reduce((sum, card) => sum + toNumber(card.limit), 0);
-    const manualCardUsed = dataSource === "secure" ? 0 : cards.reduce((sum, card) => sum + toNumber(card.balance), 0);
+    const manualCardLimit = secureCardDisplays.reduce((sum, card) => sum + toNumber(card.limit), 0);
+    const manualCardUsed = secureCardDisplays.reduce((sum, card) => sum + toNumber(card.balance), 0);
     const creditLimit = manualCardLimit + cardAccountLimit;
     const creditUsed = manualCardUsed + cardAccountUsed;
     const creditAvailable = Math.max(0, creditLimit - creditUsed);
@@ -169,35 +197,10 @@ export function AccountsHubContent({ cards, bankAccounts, userAccounts, userCard
                     >
                         {hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                     </Button>
-                    <Button
-                        variant={dataSource === "legacy" ? "default" : "outline"}
-                        onClick={() => setDataSource("legacy")}
-                    >
-                        TrueLayer
-                    </Button>
-                    <Button
-                        variant={dataSource === "secure" ? "default" : "outline"}
-                        onClick={() => setDataSource("secure")}
-                    >
-                        Secure Assets
-                    </Button>
-                    {dataSource === "legacy" ? (
-                        <>
-                            <AddCardDialog />
-                            <AddAccountDialog />
-                        </>
-                    ) : (
-                        <Link href="/secure-assets" className="inline-flex">
-                            <Button variant="outline">Manage Secure Assets</Button>
-                        </Link>
-                    )}
+                    <AddCardDialog />
+                    <AddAccountDialog />
                 </div>
             </div>
-            {dataSource === "secure" && (
-                <p className="text-sm text-muted-foreground">
-                    Showing user-managed assets. TrueLayer accounts are hidden in this view.
-                </p>
-            )}
 
             <DashboardKpis
                 netAvailable={netAvailable}
@@ -210,6 +213,9 @@ export function AccountsHubContent({ cards, bankAccounts, userAccounts, userCard
                 creditAvailable={creditAvailable}
                 creditLimit={creditLimit}
                 creditUsed={creditUsed}
+                onBankClick={() => selectSection("bank")}
+                onOverdraftClick={() => selectSection("overdraft")}
+                onCreditClick={() => selectSection("credit")}
             />
 
             <Card id="bank-accounts" className="scroll-mt-24">
@@ -239,8 +245,6 @@ export function AccountsHubContent({ cards, bankAccounts, userAccounts, userCard
                             <BankAccountsList
                                 bankAccounts={standardAccounts}
                                 context="bank"
-                                deleteEndpoint={dataSource === "secure" ? "/api/user-accounts" : undefined}
-                                showViewDialog={dataSource !== "secure"}
                             />
                         )
                     ) : (
@@ -276,8 +280,6 @@ export function AccountsHubContent({ cards, bankAccounts, userAccounts, userCard
                             <BankAccountsList
                                 bankAccounts={overdraftAccounts}
                                 context="overdraft"
-                                deleteEndpoint={dataSource === "secure" ? "/api/user-accounts" : undefined}
-                                showViewDialog={dataSource !== "secure"}
                             />
                         )
                     ) : (
@@ -307,71 +309,24 @@ export function AccountsHubContent({ cards, bankAccounts, userAccounts, userCard
                             {cardAccounts.length > 0 && (
                                 <div className="mb-4">
                                     <BankAccountsList
-                                        bankAccounts={cardAccounts}
+                                        bankAccounts={cardAccounts.map((acct) => ({ ...acct, source: "bank" as const }))}
                                         context="card"
-                                        deleteEndpoint={dataSource === "secure" ? "/api/user-accounts" : undefined}
-                                        showViewDialog={dataSource !== "secure"}
                                     />
                                 </div>
                             )}
                             <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
-                                {(dataSource === "secure" ? secureCardDisplays : cards.map((card) => ({
-                                    id: card.id,
-                                    name: card.name || "Card",
-                                    nameOnCard: null,
-                                    bank: card.bank || "Bank",
-                                    cardType: card.cardTypeId ? { name: card.cardTypeId } : null,
-                                    cardCategory: null,
-                                    last4: card.last4 || "••••",
-                                    fullCardNumber: null,
-                                    expiryDate: null,
-                                    cvv: null,
-                                    limit: typeof card.limit === "number" ? card.limit : 0,
-                                    balance: typeof card.balance === "number" ? card.balance : 0,
-                                    cutoffDate: card.cutoffDate || 1,
-                                    dueDate: card.dueDate || 1,
-                                    color: card.color || "bg-gray-800",
-                                    last3DueDates: null,
-                                    bankId: card.bankId || null,
-                                    cardTypeId: card.cardTypeId || null,
-                                }))).map((displayCard) => {
-                                    const editCard = {
-                                        id: displayCard.id,
-                                        name: displayCard.name,
-                                        nameOnCard: displayCard.nameOnCard,
-                                        bank: displayCard.bank,
-                                        bankId: "bankId" in displayCard ? displayCard.bankId : null,
-                                        last4: displayCard.last4,
-                                        fullCardNumber: displayCard.fullCardNumber,
-                                        expiryDate: displayCard.expiryDate,
-                                        cvv: displayCard.cvv,
-                                        cardTypeId: "cardTypeId" in displayCard ? displayCard.cardTypeId : null,
-                                        cardType: displayCard.cardType
-                                            ? { id: ("cardTypeId" in displayCard ? displayCard.cardTypeId : displayCard.cardType.name) || displayCard.cardType.name, name: displayCard.cardType.name }
-                                            : null,
-                                        limit: displayCard.limit,
-                                        balance: displayCard.balance,
-                                        cutoffDate: displayCard.cutoffDate,
-                                        dueDate: displayCard.dueDate,
-                                        color: displayCard.color,
-                                        statementPassword: null,
-                                        cardCategory: displayCard.cardCategory,
-                                    };
-                                    return (
-                                        <div key={displayCard.id} className="relative w-full">
-                                            <div className="absolute left-3 top-3 text-gray-500">
-                                                <CardIcon className="h-4 w-4" />
-                                            </div>
-                                            <CardDisplay card={displayCard} />
-                                            {dataSource !== "secure" && (
-                                                <div className="absolute bottom-4 right-4">
-                                                    <EditCardDialog card={editCard} triggerVariant="icon" />
-                                                </div>
-                                            )}
+                                {secureCardDisplays.map((displayCard) => (
+                                    <div key={displayCard.id} className="relative w-full">
+                                        <div className="absolute left-3 top-3 text-gray-500">
+                                            <CardIcon className="h-4 w-4" />
                                         </div>
-                                    );
-                                })}
-                                {((dataSource === "secure" ? secureCardDisplays.length : cards.length) + cardAccounts.length) === 0 &&
+                                        <CardDisplay card={displayCard} />
+                                        <div className="absolute bottom-4 right-4">
+                                            <ViewAccountMetaDialog accountMetaId={displayCard.id} triggerVariant="icon" />
+                                        </div>
+                                    </div>
+                                ))}
+                                {(secureCardDisplays.length + cardAccounts.length) === 0 &&
                                     Array.from({ length: 4 }).map((_, idx) => (
                                         <PlaceholderTile key={`card-placeholder-${idx}`} label="Credit card" />
                                     ))}

@@ -9,13 +9,6 @@ export type ApiResponse<T> = {
   };
 };
 
-export type Bank = {
-  id: string;
-  name: string;
-  icon?: string | null;
-  color?: string | null;
-};
-
 export type BankConnection = {
   id: string;
   provider: string;
@@ -48,13 +41,7 @@ export type BankAccount = {
   providerAccountId?: string | null;
   status?: string | null;
   tags?: string | null;
-};
-
-export type CardType = {
-  id: string;
-  name: string;
-  icon?: string | null;
-  color?: string | null;
+  connection?: { institutionId?: string | null; provider?: string | null } | null;
 };
 
 export type HeadAccount = {
@@ -66,8 +53,6 @@ export type Card = {
   id: string;
   name: string;
   last4?: string | null;
-  cardTypeId?: string | null;
-  bankId?: string | null;
   bank?: string | null;
   balance?: number | null;
   limit?: number | null;
@@ -126,65 +111,49 @@ export type BankTransaction = {
   meta?: BankTransactionMeta | null;
 };
 
-export type SecureRecordType = "BANK_ACCOUNT" | "OVERDRAFT" | "CREDIT_CARD" | "DEBIT_CARD" | "OTHER";
+export type AccountType =
+  | "BANK_ACCOUNT"
+  | "OVERDRAFT"
+  | "CREDIT_CARD"
+  | "DEBIT_CARD"
+  | "CASH_ACCOUNT"
+  | "CASH_CARD"
+  | "OTHER";
 
-export type SecureVaultRecord = {
+export type AccountMeta = {
   id: string;
-  recordType: SecureRecordType;
-  label: string;
-  bankName?: string | null;
-  accountNumber?: string | null;
-  sortCode?: string | null;
-  cardLast4?: string | null;
-  username?: string | null;
-  status?: string | null;
-  encryptedPayload: string;
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-export type UserAccount = {
-  id: string;
-  label: string;
-  bankName?: string | null;
-  accountType?: string | null;
-  accountNumber?: string | null;
-  sortCode?: string | null;
-  currency?: string | null;
-  balance?: number | null;
-  limit?: number | null;
-  status?: string | null;
   linkedBankAccountId?: string | null;
-  secureRecordId?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-export type UserCard = {
-  id: string;
-  cardType?: string | null;
+  parentAccountId?: string | null;
+  accountType: AccountType;
   label: string;
-  issuerBankName?: string | null;
-  network?: string | null;
-  last4?: string | null;
+  accountHolderName?: string | null;
+  bankName?: string | null;
+  currency?: string | null;
+  internationalAccountNumber?: string | null;
+  accountNumber?: string | null;
+  sortCode?: string | null;
+  balance?: number | null;
+  availableBalance?: number | null;
+  limit?: number | null;
+  cardNetwork?: string | null;
+  cardLast4?: string | null;
+  cardImageUrl?: string | null;
+  documentImageUrls?: string[] | null;
   statementDay?: number | null;
   dueDay?: number | null;
   last3StatementDates?: string | null;
   last3DueDates?: string | null;
   status?: string | null;
-  imageUrl?: string | null;
-  linkedBankAccountId?: string | null;
-  secureRecordId?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };
 
-export type UserAccountCard = {
+export type SensitiveInfo = {
   id: string;
-  userAccountId: string;
-  userCardId: string;
-  relationType?: string | null;
+  accountMetaId: string;
+  encryptedPayload: string;
   createdAt?: string;
+  updatedAt?: string;
 };
 
 export type AnalyticsValuePoint = {

@@ -31,6 +31,8 @@ env:
   IMAGE_NAME_BACKEND_PR: card-sense-backend-pr
   IMAGE_NAME_FRONTEND: card-sense-frontend
   IMAGE_NAME_FRONTEND_PR: card-sense-frontend-pr
+  USE_GCS: true
+  GCS_BUCKET_NAME: abcd
 
 jobs:
   detect-destructive-migrations:

@@ -1,6 +1,11 @@
 import "dotenv/config";
 import express from "express";
 import { PrismaClient } from "@prisma/client";
+import { Storage } from "@google-cloud/storage";
+import multer from "multer";
+import crypto from "crypto";
+import fs from "fs/promises";
+import path from "path";
 import {
   exchangeCodeForTokens,
   fetchAccounts,
@@ -36,8 +41,97 @@ const OWNER_EMAILS = (process.env.OWNER_EMAILS || "")
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
 const FEEDBACK_EMAIL = process.env.FEEDBACK_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER || "";
+const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME || "";
+const GCS_DOCUMENT_PREFIX = process.env.GCS_DOCUMENT_PREFIX || "account-meta-documents";
+const LOCAL_DOCUMENT_ROOT =
+  process.env.LOCAL_DOCUMENT_ROOT || path.resolve(process.cwd(), "uploads");
+const MAX_DOCUMENT_SIZE_BYTES = Number(process.env.DOCUMENT_MAX_BYTES || 5 * 1024 * 1024);
+const USE_GCS =
+  process.env.USE_GCS === "true" || (process.env.NODE_ENV === "production" && Boolean(GCS_BUCKET_NAME));
 
 app.use(express.json({ limit: "5mb" }));
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_DOCUMENT_SIZE_BYTES },
+});
+
+const gcsStorage = USE_GCS && GCS_BUCKET_NAME ? new Storage() : null;
+
+const sanitizeFilename = (name) =>
+  String(name || "document")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9.\-_]/g, "");
+
+const sanitizeSegment = (value) =>
+  String(value || "unknown")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9\-_]/g, "");
+
+const stripKeyPrefix = (key) => String(key || "").replace(/^local:|^gcs:/, "");
+
+const getStorageModeForKey = (key) => {
+  if (key && key.startsWith("local:")) return "local";
+  if (key && key.startsWith("gcs:")) return "gcs";
+  return gcsStorage ? "gcs" : "local";
+};
+
+const buildDocumentKey = (accountMeta, userId, filename) => {
+  const bankSegment = sanitizeSegment(accountMeta.bankName || "unknown");
+  const typeSegment = sanitizeSegment(accountMeta.accountType || "unknown");
+  const folder = `${bankSegment}_${typeSegment}`;
+  const safeName = sanitizeFilename(filename);
+  const uniqueName = `${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+  const basePath = path.posix.join(GCS_DOCUMENT_PREFIX, folder, userId, accountMeta.id);
+  const objectKey = path.posix.join(basePath, uniqueName);
+  const storageKey = gcsStorage ? `gcs:${objectKey}` : `local:${objectKey}`;
+  return { objectKey, storageKey };
+};
+
+const resolveLocalPath = (objectKey) => {
+  const resolved = path.resolve(LOCAL_DOCUMENT_ROOT, objectKey);
+  if (!resolved.startsWith(LOCAL_DOCUMENT_ROOT)) {
+    throw new Error("Invalid document path.");
+  }
+  return resolved;
+};
+
+const deleteDocumentKey = async (key) => {
+  if (!key) return;
+  if (String(key).startsWith("data:")) return;
+  const mode = getStorageModeForKey(key);
+  const objectKey = stripKeyPrefix(key);
+  if (mode === "gcs" && gcsStorage) {
+    try {
+      await gcsStorage.bucket(GCS_BUCKET_NAME).file(objectKey).delete({ ignoreNotFound: true });
+    } catch (error) {
+      console.error("Failed to delete GCS object:", error);
+    }
+    return;
+  }
+  if (mode === "gcs") {
+    console.warn("GCS object deletion skipped: storage not configured.");
+    return;
+  }
+  if (mode === "local") {
+    try {
+      const filePath = resolveLocalPath(objectKey);
+      await fs.unlink(filePath);
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        console.error("Failed to delete local document:", error);
+      }
+    }
+  }
+};
+
+const deleteDocumentKeys = async (keys) => {
+  if (!Array.isArray(keys) || !keys.length) return;
+  await Promise.all(keys.map((key) => deleteDocumentKey(key)));
+};
 
 const parseAmount = (value) => {
   if (value === null || value === undefined) return null;
@@ -246,6 +340,35 @@ const parseRawJson = (raw) => {
   }
 };
 
+const normalizeCategoryValue = (value) => {
+  if (!value) return "";
+  if (Array.isArray(value)) return String(value[0] || "");
+  return String(value);
+};
+
+const isDirectDebitTransaction = (tx) => {
+  const raw = parseRawJson(tx.raw) || {};
+  const category = normalizeCategoryValue(raw.transaction_category || raw.category || tx.category);
+  const providerCategory = normalizeCategoryValue(raw?.meta?.provider_category || raw?.meta?.providerCategory);
+  const description = normalizeCategoryValue(raw.description || tx.descriptionVia || tx.merchant);
+  const normalized = (value) => String(value || "").toUpperCase();
+  if (normalized(category) === "DIRECT_DEBIT" || normalized(category).includes("DIRECT_DEBIT") || normalized(category).includes("DIRECT DEBIT")) {
+    return true;
+  }
+  if (normalized(providerCategory) === "DD" || normalized(providerCategory).includes("DIRECT_DEBIT") || normalized(providerCategory).includes("DIRECT DEBIT")) {
+    return true;
+  }
+  if (normalized(description).includes("DIRECT DEBIT")) return true;
+  return false;
+};
+
+const getDirectDebitKey = (tx, raw) => {
+  const reference = raw?.meta?.provider_reference || raw?.meta?.providerReference || null;
+  const name = raw?.description || tx.descriptionVia || tx.merchant || "Direct debit";
+  const key = reference ? `ref:${reference}` : String(name || "Direct debit").toUpperCase();
+  return { key, name: name || "Direct debit", reference };
+};
+
 const getManualRawMeta = (raw) => {
   const parsed = parseRawJson(raw);
   if (parsed && parsed.source === "manual") return parsed;
@@ -310,17 +433,30 @@ const ensureManualAccount = async (userId, { providerAccountId, name, type, mask
   });
 };
 
+const CARD_ACCOUNT_TYPES = ["CREDIT_CARD", "DEBIT_CARD", "CASH_CARD"];
+
+const resolveManualCardAccountMeta = async (userId, cardId) => {
+  if (!cardId) return null;
+  return prisma.accountMeta.findFirst({
+    where: {
+      id: cardId,
+      userId,
+      accountType: { in: CARD_ACCOUNT_TYPES },
+    },
+  });
+};
+
 const resolveManualAccountForTransaction = async (userId, cardId) => {
   if (cardId) {
-    const card = await prisma.card.findFirst({ where: { id: cardId, userId } });
-    if (!card) return { account: null, card: null };
+    const cardMeta = await resolveManualCardAccountMeta(userId, cardId);
+    if (!cardMeta) return { account: null, cardMeta: null };
     const account = await ensureManualAccount(userId, {
-      providerAccountId: `manual-card-${card.id}`,
-      name: card.name || "Card",
+      providerAccountId: `manual-card-${cardMeta.id}`,
+      name: cardMeta.label || "Card",
       type: "card",
-      mask: card.last4 || null,
+      mask: cardMeta.cardLast4 || null,
     });
-    return { account, card };
+    return { account, cardMeta };
   }
   const account = await ensureManualAccount(userId, {
     providerAccountId: "manual-cash",
@@ -328,7 +464,7 @@ const resolveManualAccountForTransaction = async (userId, cardId) => {
     type: "cash",
     mask: null,
   });
-  return { account, card: null };
+  return { account, cardMeta: null };
 };
 app.use((req, res, next) => {
   const allowedOriginRaw = process.env.CORS_ORIGIN || "*";
@@ -699,7 +835,7 @@ app.get("/api/admin/metrics", async (req, res) => {
       prisma.user.count(),
       prisma.user.count({ where: { emailVerifiedAt: { not: null } } }),
       prisma.user.count({ where: { lastLoginAt: { gte: since } } }),
-      prisma.card.count(),
+      prisma.accountMeta.count({ where: { accountType: { in: CARD_ACCOUNT_TYPES } } }),
       prisma.bankAccount.count(),
       prisma.bankTransaction.count(),
       prisma.bankTransaction.count({
@@ -764,271 +900,50 @@ app.post("/api/feedback", async (req, res) => {
   }
 });
 
-app.get("/api/cards", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const cards = await prisma.card.findMany({
-      where: { userId },
-      include: { cardType: true, bankRef: true },
-      orderBy: { createdAt: "desc" },
-    });
-    res.json(cards);
-  } catch (error) {
-    console.error("Failed to fetch cards:", error);
-    res.status(500).json({ error: "Failed to fetch cards" });
-  }
-});
+const normalizeAccountType = (value) => {
+  if (!value || typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase().replace(/\s+/g, "_");
+  const allowed = new Set([
+    "BANK_ACCOUNT",
+    "OVERDRAFT",
+    "CREDIT_CARD",
+    "DEBIT_CARD",
+    "CASH_ACCOUNT",
+    "CASH_CARD",
+    "OTHER",
+  ]);
+  return allowed.has(normalized) ? normalized : null;
+};
 
-app.post("/api/cards", async (req, res) => {
+app.get("/api/account-meta", async (req, res) => {
   try {
     const userId = req.user.id;
-    const payload = req.body || {};
-    if (!payload.name || !payload.bank || !payload.last4) {
-      res.status(400).json({ error: "name, bank, and last4 are required" });
-      return;
+    const { linkedBankAccountId, parentAccountId, accountType } = req.query;
+    const where = { userId };
+    if (linkedBankAccountId) where.linkedBankAccountId = String(linkedBankAccountId);
+    if (parentAccountId) where.parentAccountId = String(parentAccountId);
+    if (accountType) {
+      const normalized = normalizeAccountType(String(accountType));
+      if (normalized) where.accountType = normalized;
     }
-    const card = await prisma.card.create({
-      data: {
-        userId,
-        name: payload.name,
-        nameOnCard: payload.nameOnCard || null,
-        bank: payload.bank,
-        bankId: payload.bankId || null,
-        cardTypeId: payload.cardTypeId || null,
-        cardCategory: payload.cardCategory || null,
-        last4: payload.last4,
-        fullCardNumber: payload.fullCardNumber || null,
-        expiryDate: payload.expiryDate || null,
-        cvv: payload.cvv || null,
-        statementPassword: payload.statementPassword || null,
-        limit: Number(payload.limit || 0),
-        balance: Number(payload.balance || 0),
-        cutoffDate: Number(payload.cutoffDate || 1),
-        dueDate: Number(payload.dueDate || 1),
-        last3DueDates: payload.last3DueDates || null,
-        color: payload.color || "bg-gray-800",
-      },
-    });
-    res.status(201).json(card);
-  } catch (error) {
-    console.error("Failed to create card:", error);
-    res.status(500).json({ error: "Failed to create card" });
-  }
-});
-
-app.put("/api/cards/:id", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const updated = await prisma.card.updateMany({
-      where: { id: req.params.id, userId },
-      data: req.body || {},
-    });
-    if (!updated.count) {
-      res.status(404).json({ error: "Card not found" });
-      return;
-    }
-    res.json({ success: true });
-  } catch (error) {
-    console.error("Failed to update card:", error);
-    res.status(500).json({ error: "Failed to update card" });
-  }
-});
-
-app.delete("/api/cards/:id", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const deleted = await prisma.card.deleteMany({ where: { id: req.params.id, userId } });
-    if (!deleted.count) {
-      res.status(404).json({ error: "Card not found" });
-      return;
-    }
-    res.status(204).send();
-  } catch (error) {
-    console.error("Failed to delete card:", error);
-    res.status(500).json({ error: "Failed to delete card" });
-  }
-});
-
-app.get("/api/banks", async (_req, res) => {
-  try {
-    const banks = await prisma.bank.findMany({ orderBy: { name: "asc" } });
-    res.json(banks);
-  } catch (error) {
-    console.error("Failed to fetch banks:", error);
-    res.status(500).json({ error: "Failed to fetch banks" });
-  }
-});
-
-app.post("/api/banks", async (req, res) => {
-  try {
-    const { name, icon, color } = req.body || {};
-    if (!name) {
-      res.status(400).json({ error: "name is required" });
-      return;
-    }
-    const bank = await prisma.bank.create({ data: { name, icon: icon || null, color: color || null } });
-    res.status(201).json({ success: true, data: bank });
-  } catch (error) {
-    console.error("Failed to create bank:", error);
-    res.status(500).json({ error: "Failed to create bank" });
-  }
-});
-
-app.put("/api/banks/:id", async (req, res) => {
-  try {
-    const { name, icon, color } = req.body || {};
-    const bank = await prisma.bank.update({
-      where: { id: req.params.id },
-      data: { name, icon: icon || null, color: color || null },
-    });
-    res.json({ success: true, data: bank });
-  } catch (error) {
-    console.error("Failed to update bank:", error);
-    res.status(500).json({ error: "Failed to update bank" });
-  }
-});
-
-app.delete("/api/banks/:id", async (req, res) => {
-  try {
-    await prisma.bank.delete({ where: { id: req.params.id } });
-    res.status(204).send();
-  } catch (error) {
-    console.error("Failed to delete bank:", error);
-    res.status(500).json({ error: "Failed to delete bank" });
-  }
-});
-
-app.get("/api/secure-vault", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const records = await prisma.secureVaultRecord.findMany({
-      where: { userId },
+    const records = await prisma.accountMeta.findMany({
+      where,
       orderBy: { createdAt: "desc" },
     });
     res.json(records);
   } catch (error) {
-    console.error("Failed to fetch secure vault records:", error);
-    res.status(500).json({ error: "Failed to fetch secure vault records" });
+    console.error("Failed to fetch account metadata:", error);
+    res.status(500).json({ error: "Failed to fetch account metadata" });
   }
 });
 
-app.post("/api/secure-vault", async (req, res) => {
+app.post("/api/account-meta", async (req, res) => {
   try {
     const userId = req.user.id;
     const payload = req.body || {};
-    if (!payload.recordType || !payload.label || !payload.encryptedPayload) {
-      res.status(400).json({ error: "recordType, label, and encryptedPayload are required" });
-      return;
-    }
-    const record = await prisma.secureVaultRecord.create({
-      data: {
-        userId,
-        recordType: payload.recordType,
-        label: String(payload.label),
-        bankName: typeof payload.bankName === "string" ? payload.bankName : null,
-        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : null,
-        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : null,
-        cardLast4: typeof payload.cardLast4 === "string" ? payload.cardLast4 : null,
-        username: typeof payload.username === "string" ? payload.username : null,
-        status: typeof payload.status === "string" ? payload.status : "active",
-        encryptedPayload: String(payload.encryptedPayload),
-      },
-    });
-    res.status(201).json(record);
-  } catch (error) {
-    console.error("Failed to create secure vault record:", error);
-    res.status(500).json({ error: "Failed to create secure vault record" });
-  }
-});
-
-app.get("/api/secure-vault/:id", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const record = await prisma.secureVaultRecord.findFirst({
-      where: { id: req.params.id, userId },
-    });
-    if (!record) {
-      res.status(404).json({ error: "Record not found" });
-      return;
-    }
-    res.json(record);
-  } catch (error) {
-    console.error("Failed to fetch secure vault record:", error);
-    res.status(500).json({ error: "Failed to fetch secure vault record" });
-  }
-});
-
-app.put("/api/secure-vault/:id", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const payload = req.body || {};
-    const existing = await prisma.secureVaultRecord.findFirst({
-      where: { id: req.params.id, userId },
-    });
-    if (!existing) {
-      res.status(404).json({ error: "Record not found" });
-      return;
-    }
-    const updated = await prisma.secureVaultRecord.update({
-      where: { id: existing.id },
-      data: {
-        recordType: payload.recordType || existing.recordType,
-        label: typeof payload.label === "string" ? payload.label : existing.label,
-        bankName: typeof payload.bankName === "string" ? payload.bankName : existing.bankName,
-        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : existing.accountNumber,
-        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : existing.sortCode,
-        cardLast4: typeof payload.cardLast4 === "string" ? payload.cardLast4 : existing.cardLast4,
-        username: typeof payload.username === "string" ? payload.username : existing.username,
-        status: typeof payload.status === "string" ? payload.status : existing.status,
-        encryptedPayload: typeof payload.encryptedPayload === "string" ? payload.encryptedPayload : existing.encryptedPayload,
-      },
-    });
-    res.json(updated);
-  } catch (error) {
-    console.error("Failed to update secure vault record:", error);
-    res.status(500).json({ error: "Failed to update secure vault record" });
-  }
-});
-
-app.delete("/api/secure-vault/:id", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const existing = await prisma.secureVaultRecord.findFirst({
-      where: { id: req.params.id, userId },
-    });
-    if (!existing) {
-      res.status(404).json({ error: "Record not found" });
-      return;
-    }
-    await prisma.secureVaultRecord.delete({ where: { id: existing.id } });
-    res.status(204).send();
-  } catch (error) {
-    console.error("Failed to delete secure vault record:", error);
-    res.status(500).json({ error: "Failed to delete secure vault record" });
-  }
-});
-
-app.get("/api/user-accounts", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const accounts = await prisma.userAccount.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      include: { secureRecord: true, linkedBankAccount: true },
-    });
-    res.json(accounts);
-  } catch (error) {
-    console.error("Failed to fetch user accounts:", error);
-    res.status(500).json({ error: "Failed to fetch user accounts" });
-  }
-});
-
-app.post("/api/user-accounts", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const payload = req.body || {};
-    if (!payload.label) {
-      res.status(400).json({ error: "label is required" });
+    const normalizedType = normalizeAccountType(payload.accountType);
+    if (!payload.label || !normalizedType) {
+      res.status(400).json({ error: "label and accountType are required" });
       return;
     }
     let linkedBankAccountId = null;
@@ -1042,233 +957,80 @@ app.post("/api/user-accounts", async (req, res) => {
       }
       linkedBankAccountId = bankAccount.id;
     }
-    let secureRecordId = null;
-    if (typeof payload.secureRecordId === "string") {
-      const record = await prisma.secureVaultRecord.findFirst({
-        where: { id: payload.secureRecordId, userId },
+    let parentAccountId = null;
+    if (typeof payload.parentAccountId === "string") {
+      const parent = await prisma.accountMeta.findFirst({
+        where: { id: payload.parentAccountId, userId },
       });
-      if (!record) {
-        res.status(404).json({ error: "Secure record not found" });
+      if (!parent) {
+        res.status(404).json({ error: "Parent account not found" });
         return;
       }
-      secureRecordId = record.id;
+      parentAccountId = parent.id;
     }
-    const account = await prisma.userAccount.create({
+    const documentImageUrls = Array.isArray(payload.documentImageUrls)
+      ? payload.documentImageUrls.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim())
+      : [];
+    const record = await prisma.accountMeta.create({
       data: {
         userId,
+        linkedBankAccount: linkedBankAccountId ? { connect: { id: linkedBankAccountId } } : undefined,
+        parentAccountId,
+        accountType: normalizedType,
         label: String(payload.label),
+        accountHolderName: typeof payload.accountHolderName === "string" ? payload.accountHolderName : null,
         bankName: typeof payload.bankName === "string" ? payload.bankName : null,
-        accountType: typeof payload.accountType === "string" ? payload.accountType : "bank",
-        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : null,
-        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : null,
         currency: typeof payload.currency === "string" ? payload.currency : null,
+        internationalAccountNumber: typeof payload.internationalAccountNumber === "string" ? payload.internationalAccountNumber : null,
+        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : null,
+        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : null,
         balance: typeof payload.balance === "number" ? payload.balance : payload.balance ? Number(payload.balance) : null,
+        availableBalance: typeof payload.availableBalance === "number" ? payload.availableBalance : payload.availableBalance ? Number(payload.availableBalance) : null,
         limit: typeof payload.limit === "number" ? payload.limit : payload.limit ? Number(payload.limit) : null,
-        status: typeof payload.status === "string" ? payload.status : "active",
-        linkedBankAccountId,
-        secureRecordId,
-      },
-    });
-    res.status(201).json(account);
-  } catch (error) {
-    console.error("Failed to create user account:", error);
-    res.status(500).json({ error: "Failed to create user account" });
-  }
-});
-
-app.get("/api/user-accounts/:id", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const account = await prisma.userAccount.findFirst({
-      where: { id: req.params.id, userId },
-      include: { secureRecord: true, linkedBankAccount: true, cards: true },
-    });
-    if (!account) {
-      res.status(404).json({ error: "Account not found" });
-      return;
-    }
-    res.json(account);
-  } catch (error) {
-    console.error("Failed to fetch user account:", error);
-    res.status(500).json({ error: "Failed to fetch user account" });
-  }
-});
-
-app.put("/api/user-accounts/:id", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const payload = req.body || {};
-    const existing = await prisma.userAccount.findFirst({
-      where: { id: req.params.id, userId },
-    });
-    if (!existing) {
-      res.status(404).json({ error: "Account not found" });
-      return;
-    }
-    let linkedBankAccountId = existing.linkedBankAccountId || null;
-    if (payload.linkedBankAccountId === null) {
-      linkedBankAccountId = null;
-    } else if (typeof payload.linkedBankAccountId === "string") {
-      const bankAccount = await prisma.bankAccount.findFirst({
-        where: { id: payload.linkedBankAccountId, userId },
-      });
-      if (!bankAccount) {
-        res.status(404).json({ error: "Bank account not found" });
-        return;
-      }
-      linkedBankAccountId = bankAccount.id;
-    }
-    let secureRecordId = existing.secureRecordId || null;
-    if (payload.secureRecordId === null) {
-      secureRecordId = null;
-    } else if (typeof payload.secureRecordId === "string") {
-      const record = await prisma.secureVaultRecord.findFirst({
-        where: { id: payload.secureRecordId, userId },
-      });
-      if (!record) {
-        res.status(404).json({ error: "Secure record not found" });
-        return;
-      }
-      secureRecordId = record.id;
-    }
-    const updated = await prisma.userAccount.update({
-      where: { id: existing.id },
-      data: {
-        label: typeof payload.label === "string" ? payload.label : existing.label,
-        bankName: typeof payload.bankName === "string" ? payload.bankName : existing.bankName,
-        accountType: typeof payload.accountType === "string" ? payload.accountType : existing.accountType,
-        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : existing.accountNumber,
-        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : existing.sortCode,
-        currency: typeof payload.currency === "string" ? payload.currency : existing.currency,
-        balance: payload.balance !== undefined ? Number(payload.balance) : existing.balance,
-        limit: payload.limit !== undefined ? Number(payload.limit) : existing.limit,
-        status: typeof payload.status === "string" ? payload.status : existing.status,
-        linkedBankAccountId,
-        secureRecordId,
-      },
-    });
-    res.json(updated);
-  } catch (error) {
-    console.error("Failed to update user account:", error);
-    res.status(500).json({ error: "Failed to update user account" });
-  }
-});
-
-app.delete("/api/user-accounts/:id", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const existing = await prisma.userAccount.findFirst({
-      where: { id: req.params.id, userId },
-    });
-    if (!existing) {
-      res.status(404).json({ error: "Account not found" });
-      return;
-    }
-    await prisma.userAccount.delete({ where: { id: existing.id } });
-    res.status(204).send();
-  } catch (error) {
-    console.error("Failed to delete user account:", error);
-    res.status(500).json({ error: "Failed to delete user account" });
-  }
-});
-
-app.get("/api/user-cards", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const cards = await prisma.userCard.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      include: { secureRecord: true, linkedBankAccount: true },
-    });
-    res.json(cards);
-  } catch (error) {
-    console.error("Failed to fetch user cards:", error);
-    res.status(500).json({ error: "Failed to fetch user cards" });
-  }
-});
-
-app.post("/api/user-cards", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const payload = req.body || {};
-    if (!payload.label) {
-      res.status(400).json({ error: "label is required" });
-      return;
-    }
-    let linkedBankAccountId = null;
-    if (typeof payload.linkedBankAccountId === "string") {
-      const bankAccount = await prisma.bankAccount.findFirst({
-        where: { id: payload.linkedBankAccountId, userId },
-      });
-      if (!bankAccount) {
-        res.status(404).json({ error: "Bank account not found" });
-        return;
-      }
-      linkedBankAccountId = bankAccount.id;
-    }
-    let secureRecordId = null;
-    if (typeof payload.secureRecordId === "string") {
-      const record = await prisma.secureVaultRecord.findFirst({
-        where: { id: payload.secureRecordId, userId },
-      });
-      if (!record) {
-        res.status(404).json({ error: "Secure record not found" });
-        return;
-      }
-      secureRecordId = record.id;
-    }
-    const card = await prisma.userCard.create({
-      data: {
-        userId,
-        cardType: typeof payload.cardType === "string" ? payload.cardType : "credit",
-        label: String(payload.label),
-        issuerBankName: typeof payload.issuerBankName === "string" ? payload.issuerBankName : null,
-        network: typeof payload.network === "string" ? payload.network : null,
-        last4: typeof payload.last4 === "string" ? payload.last4 : null,
+        cardNetwork: typeof payload.cardNetwork === "string" ? payload.cardNetwork : null,
+        cardLast4: typeof payload.cardLast4 === "string" ? payload.cardLast4 : null,
+        cardImageUrl: typeof payload.cardImageUrl === "string" ? payload.cardImageUrl : null,
+        documentImageUrls,
         statementDay: typeof payload.statementDay === "number" ? payload.statementDay : payload.statementDay ? Number(payload.statementDay) : null,
         dueDay: typeof payload.dueDay === "number" ? payload.dueDay : payload.dueDay ? Number(payload.dueDay) : null,
         last3StatementDates: typeof payload.last3StatementDates === "string" ? payload.last3StatementDates : null,
         last3DueDates: typeof payload.last3DueDates === "string" ? payload.last3DueDates : null,
         status: typeof payload.status === "string" ? payload.status : "active",
-        imageUrl: typeof payload.imageUrl === "string" ? payload.imageUrl : null,
-        linkedBankAccountId,
-        secureRecordId,
       },
     });
-    res.status(201).json(card);
+    res.status(201).json(record);
   } catch (error) {
-    console.error("Failed to create user card:", error);
-    res.status(500).json({ error: "Failed to create user card" });
+    console.error("Failed to create account metadata:", error);
+    res.status(500).json({ error: "Failed to create account metadata" });
   }
 });
 
-app.get("/api/user-cards/:id", async (req, res) => {
+app.get("/api/account-meta/:id", async (req, res) => {
   try {
     const userId = req.user.id;
-    const card = await prisma.userCard.findFirst({
+    const record = await prisma.accountMeta.findFirst({
       where: { id: req.params.id, userId },
-      include: { secureRecord: true, linkedBankAccount: true, accounts: true },
     });
-    if (!card) {
-      res.status(404).json({ error: "Card not found" });
+    if (!record) {
+      res.status(404).json({ error: "Account metadata not found" });
       return;
     }
-    res.json(card);
+    res.json(record);
   } catch (error) {
-    console.error("Failed to fetch user card:", error);
-    res.status(500).json({ error: "Failed to fetch user card" });
+    console.error("Failed to fetch account metadata:", error);
+    res.status(500).json({ error: "Failed to fetch account metadata" });
   }
 });
 
-app.put("/api/user-cards/:id", async (req, res) => {
+app.put("/api/account-meta/:id", async (req, res) => {
   try {
     const userId = req.user.id;
     const payload = req.body || {};
-    const existing = await prisma.userCard.findFirst({
+    const existing = await prisma.accountMeta.findFirst({
       where: { id: req.params.id, userId },
     });
     if (!existing) {
-      res.status(404).json({ error: "Card not found" });
+      res.status(404).json({ error: "Account metadata not found" });
       return;
     }
     let linkedBankAccountId = existing.linkedBankAccountId || null;
@@ -1284,177 +1046,310 @@ app.put("/api/user-cards/:id", async (req, res) => {
       }
       linkedBankAccountId = bankAccount.id;
     }
-    let secureRecordId = existing.secureRecordId || null;
-    if (payload.secureRecordId === null) {
-      secureRecordId = null;
-    } else if (typeof payload.secureRecordId === "string") {
-      const record = await prisma.secureVaultRecord.findFirst({
-        where: { id: payload.secureRecordId, userId },
+    let parentAccountId = existing.parentAccountId || null;
+    if (payload.parentAccountId === null) {
+      parentAccountId = null;
+    } else if (typeof payload.parentAccountId === "string") {
+      const parent = await prisma.accountMeta.findFirst({
+        where: { id: payload.parentAccountId, userId },
       });
-      if (!record) {
-        res.status(404).json({ error: "Secure record not found" });
+      if (!parent) {
+        res.status(404).json({ error: "Parent account not found" });
         return;
       }
-      secureRecordId = record.id;
+      parentAccountId = parent.id;
     }
-    const updated = await prisma.userCard.update({
+    const hasParentAccountId = Object.prototype.hasOwnProperty.call(payload, "parentAccountId");
+    const parentAccountUpdate = hasParentAccountId
+      ? parentAccountId
+        ? { connect: { id: parentAccountId } }
+        : { disconnect: true }
+      : undefined;
+    const normalizedType = payload.accountType ? normalizeAccountType(payload.accountType) : existing.accountType;
+    const nextDocumentImageUrls = Array.isArray(payload.documentImageUrls)
+      ? payload.documentImageUrls.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim())
+      : existing.documentImageUrls;
+    if (Array.isArray(payload.documentImageUrls)) {
+      const existingKeys = new Set(existing.documentImageUrls || []);
+      const nextKeys = new Set(nextDocumentImageUrls || []);
+      const removed = Array.from(existingKeys).filter((key) => !nextKeys.has(key));
+      await deleteDocumentKeys(removed);
+    }
+    const hasLinkedBankAccountId = Object.prototype.hasOwnProperty.call(payload, "linkedBankAccountId");
+    const linkedBankAccountUpdate = hasLinkedBankAccountId
+      ? linkedBankAccountId
+        ? { connect: { id: linkedBankAccountId } }
+        : { disconnect: true }
+      : undefined;
+    const updated = await prisma.accountMeta.update({
       where: { id: existing.id },
       data: {
-        cardType: typeof payload.cardType === "string" ? payload.cardType : existing.cardType,
+        linkedBankAccount: linkedBankAccountUpdate,
+        parentAccount: parentAccountUpdate,
+        accountType: normalizedType || existing.accountType,
         label: typeof payload.label === "string" ? payload.label : existing.label,
-        issuerBankName: typeof payload.issuerBankName === "string" ? payload.issuerBankName : existing.issuerBankName,
-        network: typeof payload.network === "string" ? payload.network : existing.network,
-        last4: typeof payload.last4 === "string" ? payload.last4 : existing.last4,
+        accountHolderName: typeof payload.accountHolderName === "string" ? payload.accountHolderName : existing.accountHolderName,
+        bankName: typeof payload.bankName === "string" ? payload.bankName : existing.bankName,
+        currency: typeof payload.currency === "string" ? payload.currency : existing.currency,
+        internationalAccountNumber: typeof payload.internationalAccountNumber === "string" ? payload.internationalAccountNumber : existing.internationalAccountNumber,
+        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : existing.accountNumber,
+        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : existing.sortCode,
+        balance: payload.balance !== undefined ? Number(payload.balance) : existing.balance,
+        availableBalance: payload.availableBalance !== undefined ? Number(payload.availableBalance) : existing.availableBalance,
+        limit: payload.limit !== undefined ? Number(payload.limit) : existing.limit,
+        cardNetwork: typeof payload.cardNetwork === "string" ? payload.cardNetwork : existing.cardNetwork,
+        cardLast4: typeof payload.cardLast4 === "string" ? payload.cardLast4 : existing.cardLast4,
+        cardImageUrl: typeof payload.cardImageUrl === "string" ? payload.cardImageUrl : existing.cardImageUrl,
+        documentImageUrls: nextDocumentImageUrls,
         statementDay: payload.statementDay !== undefined ? Number(payload.statementDay) : existing.statementDay,
         dueDay: payload.dueDay !== undefined ? Number(payload.dueDay) : existing.dueDay,
         last3StatementDates: typeof payload.last3StatementDates === "string" ? payload.last3StatementDates : existing.last3StatementDates,
         last3DueDates: typeof payload.last3DueDates === "string" ? payload.last3DueDates : existing.last3DueDates,
         status: typeof payload.status === "string" ? payload.status : existing.status,
-        imageUrl: typeof payload.imageUrl === "string" ? payload.imageUrl : existing.imageUrl,
-        linkedBankAccountId,
-        secureRecordId,
       },
     });
     res.json(updated);
   } catch (error) {
-    console.error("Failed to update user card:", error);
-    res.status(500).json({ error: "Failed to update user card" });
+    console.error("Failed to update account metadata:", error);
+    res.status(500).json({ error: "Failed to update account metadata" });
   }
 });
 
-app.delete("/api/user-cards/:id", async (req, res) => {
+app.delete("/api/account-meta/:id", async (req, res) => {
   try {
     const userId = req.user.id;
-    const existing = await prisma.userCard.findFirst({
+    const existing = await prisma.accountMeta.findFirst({
       where: { id: req.params.id, userId },
     });
     if (!existing) {
-      res.status(404).json({ error: "Card not found" });
+      res.status(404).json({ error: "Account metadata not found" });
       return;
     }
-    await prisma.userCard.delete({ where: { id: existing.id } });
+    await deleteDocumentKeys(existing.documentImageUrls || []);
+    await prisma.accountMeta.delete({ where: { id: existing.id } });
     res.status(204).send();
   } catch (error) {
-    console.error("Failed to delete user card:", error);
-    res.status(500).json({ error: "Failed to delete user card" });
+    console.error("Failed to delete account metadata:", error);
+    res.status(500).json({ error: "Failed to delete account metadata" });
   }
 });
 
-app.get("/api/user-account-cards", async (req, res) => {
+app.post("/api/account-meta/:id/documents", upload.array("files", 10), async (req, res) => {
   try {
     const userId = req.user.id;
-    const links = await prisma.userAccountCard.findMany({
-      where: { userAccount: { userId } },
-      include: { userAccount: true, userCard: true },
-      orderBy: { createdAt: "desc" },
+    const accountMeta = await prisma.accountMeta.findFirst({
+      where: { id: req.params.id, userId },
     });
-    res.json(links);
+    if (!accountMeta) {
+      res.status(404).json({ error: "Account metadata not found" });
+      return;
+    }
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (!files.length) {
+      res.status(400).json({ error: "No files uploaded" });
+      return;
+    }
+    const uploaded = [];
+    for (const file of files) {
+      const { objectKey, storageKey } = buildDocumentKey(accountMeta, userId, file.originalname);
+      if (gcsStorage) {
+        const bucket = gcsStorage.bucket(GCS_BUCKET_NAME);
+        await bucket.file(objectKey).save(file.buffer, {
+          contentType: file.mimetype,
+          resumable: false,
+          metadata: { cacheControl: "private, max-age=0, no-store" },
+        });
+      } else {
+        const filePath = resolveLocalPath(objectKey);
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, file.buffer);
+      }
+      uploaded.push({
+        key: storageKey,
+        filename: file.originalname,
+        contentType: file.mimetype,
+      });
+    }
+    const nextDocumentImageUrls = [...(accountMeta.documentImageUrls || []), ...uploaded.map((doc) => doc.key)];
+    try {
+      const updated = await prisma.accountMeta.update({
+        where: { id: accountMeta.id },
+        data: { documentImageUrls: nextDocumentImageUrls },
+      });
+      res.json({ documents: uploaded, documentImageUrls: updated.documentImageUrls });
+    } catch (error) {
+      await deleteDocumentKeys(uploaded.map((doc) => doc.key));
+      throw error;
+    }
   } catch (error) {
-    console.error("Failed to fetch user account cards:", error);
-    res.status(500).json({ error: "Failed to fetch user account cards" });
+    console.error("Failed to upload account documents:", error);
+    res.status(500).json({ error: "Failed to upload account documents" });
   }
 });
 
-app.post("/api/user-account-cards", async (req, res) => {
+app.get("/api/account-meta/:id/documents/:index", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const accountMeta = await prisma.accountMeta.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!accountMeta) {
+      res.status(404).json({ error: "Account metadata not found" });
+      return;
+    }
+    const index = Number(req.params.index);
+    const documents = Array.isArray(accountMeta.documentImageUrls) ? accountMeta.documentImageUrls : [];
+    if (!Number.isInteger(index) || index < 0 || index >= documents.length) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+    const key = documents[index];
+    const mode = getStorageModeForKey(key);
+    const objectKey = stripKeyPrefix(key);
+    if (mode === "gcs" && gcsStorage) {
+      const bucket = gcsStorage.bucket(GCS_BUCKET_NAME);
+      const file = bucket.file(objectKey);
+      const [metadata] = await file.getMetadata();
+      const filename = objectKey.split("/").pop() || "document";
+      res.setHeader("Content-Type", metadata.contentType || "application/octet-stream");
+      res.setHeader("Cache-Control", "private, max-age=0, no-store");
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+      file
+        .createReadStream()
+        .on("error", (error) => {
+          console.error("Failed to stream document:", error);
+          if (!res.headersSent) {
+            res.status(500).json({ error: "Failed to load document" });
+          }
+        })
+        .pipe(res);
+      return;
+    }
+    if (mode === "gcs") {
+      res.status(500).json({ error: "GCS is not configured" });
+      return;
+    }
+    const filePath = resolveLocalPath(objectKey);
+    res.setHeader("Cache-Control", "private, max-age=0, no-store");
+    res.setHeader("Content-Disposition", `inline; filename="${path.basename(filePath)}"`);
+    res.type(path.extname(filePath) || "application/octet-stream");
+    res.sendFile(filePath, (error) => {
+      if (error) {
+        console.error("Failed to stream local document:", error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Failed to load document" });
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Failed to fetch account document:", error);
+    res.status(500).json({ error: "Failed to fetch account document" });
+  }
+});
+
+app.get("/api/sensitive-info", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { accountMetaId, includePayload } = req.query;
+    const where = { userId };
+    if (accountMetaId) where.accountMetaId = String(accountMetaId);
+    const records = await prisma.sensitiveInfo.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+    });
+    if (includePayload === "true") {
+      res.json(records);
+      return;
+    }
+    const masked = records.map((record) => ({
+      ...record,
+      encryptedPayload: "",
+    }));
+    res.json(masked);
+  } catch (error) {
+    console.error("Failed to fetch sensitive info:", error);
+    res.status(500).json({ error: "Failed to fetch sensitive info" });
+  }
+});
+
+app.post("/api/sensitive-info", async (req, res) => {
   try {
     const userId = req.user.id;
     const payload = req.body || {};
-    if (!payload.userAccountId || !payload.userCardId) {
-      res.status(400).json({ error: "userAccountId and userCardId are required" });
+    if (!payload.accountMetaId || !payload.encryptedPayload) {
+      res.status(400).json({ error: "accountMetaId and encryptedPayload are required" });
       return;
     }
-    const account = await prisma.userAccount.findFirst({
-      where: { id: payload.userAccountId, userId },
+    const accountMeta = await prisma.accountMeta.findFirst({
+      where: { id: payload.accountMetaId, userId },
     });
-    if (!account) {
-      res.status(404).json({ error: "Account not found" });
+    if (!accountMeta) {
+      res.status(404).json({ error: "Account metadata not found" });
       return;
     }
-    const card = await prisma.userCard.findFirst({
-      where: { id: payload.userCardId, userId },
-    });
-    if (!card) {
-      res.status(404).json({ error: "Card not found" });
-      return;
-    }
-    const link = await prisma.userAccountCard.create({
+    const record = await prisma.sensitiveInfo.create({
       data: {
-        userAccountId: account.id,
-        userCardId: card.id,
-        relationType: typeof payload.relationType === "string" ? payload.relationType : null,
+        userId,
+        accountMetaId: accountMeta.id,
+        encryptedPayload: String(payload.encryptedPayload),
       },
     });
-    res.status(201).json(link);
+    res.status(201).json(record);
   } catch (error) {
-    console.error("Failed to create user account card link:", error);
-    res.status(500).json({ error: "Failed to create user account card link" });
+    console.error("Failed to create sensitive info:", error);
+    res.status(500).json({ error: "Failed to create sensitive info" });
   }
 });
 
-app.delete("/api/user-account-cards/:id", async (req, res) => {
+app.put("/api/sensitive-info/:id", async (req, res) => {
   try {
     const userId = req.user.id;
-    const existing = await prisma.userAccountCard.findFirst({
-      where: { id: req.params.id, userAccount: { userId } },
+    const payload = req.body || {};
+    const existing = await prisma.sensitiveInfo.findFirst({
+      where: { id: req.params.id, userId },
     });
     if (!existing) {
-      res.status(404).json({ error: "Link not found" });
+      res.status(404).json({ error: "Sensitive info not found" });
       return;
     }
-    await prisma.userAccountCard.delete({ where: { id: existing.id } });
-    res.status(204).send();
-  } catch (error) {
-    console.error("Failed to delete user account card link:", error);
-    res.status(500).json({ error: "Failed to delete user account card link" });
-  }
-});
-
-app.get("/api/card-types", async (_req, res) => {
-  try {
-    const cardTypes = await prisma.cardType.findMany({ orderBy: { name: "asc" } });
-    res.json(cardTypes);
-  } catch (error) {
-    console.error("Failed to fetch card types:", error);
-    res.status(500).json({ error: "Failed to fetch card types" });
-  }
-});
-
-app.post("/api/card-types", async (req, res) => {
-  try {
-    const { name, icon, color } = req.body || {};
-    if (!name) {
-      res.status(400).json({ error: "name is required" });
-      return;
+    if (payload.accountMetaId) {
+      const accountMeta = await prisma.accountMeta.findFirst({
+        where: { id: payload.accountMetaId, userId },
+      });
+      if (!accountMeta) {
+        res.status(404).json({ error: "Account metadata not found" });
+        return;
+      }
     }
-    const cardType = await prisma.cardType.create({ data: { name, icon: icon || null, color: color || null } });
-    res.status(201).json({ success: true, data: cardType });
-  } catch (error) {
-    console.error("Failed to create card type:", error);
-    res.status(500).json({ error: "Failed to create card type" });
-  }
-});
-
-app.put("/api/card-types/:id", async (req, res) => {
-  try {
-    const { name, icon, color } = req.body || {};
-    const cardType = await prisma.cardType.update({
-      where: { id: req.params.id },
-      data: { name, icon: icon || null, color: color || null },
+    const updated = await prisma.sensitiveInfo.update({
+      where: { id: existing.id },
+      data: {
+        accountMetaId: payload.accountMetaId || existing.accountMetaId,
+        encryptedPayload: typeof payload.encryptedPayload === "string" ? payload.encryptedPayload : existing.encryptedPayload,
+      },
     });
-    res.json({ success: true, data: cardType });
+    res.json(updated);
   } catch (error) {
-    console.error("Failed to update card type:", error);
-    res.status(500).json({ error: "Failed to update card type" });
+    console.error("Failed to update sensitive info:", error);
+    res.status(500).json({ error: "Failed to update sensitive info" });
   }
 });
 
-app.delete("/api/card-types/:id", async (req, res) => {
+app.delete("/api/sensitive-info/:id", async (req, res) => {
   try {
-    await prisma.cardType.delete({ where: { id: req.params.id } });
+    const userId = req.user.id;
+    const existing = await prisma.sensitiveInfo.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Sensitive info not found" });
+      return;
+    }
+    await prisma.sensitiveInfo.delete({ where: { id: existing.id } });
     res.status(204).send();
   } catch (error) {
-    console.error("Failed to delete card type:", error);
-    res.status(500).json({ error: "Failed to delete card type" });
+    console.error("Failed to delete sensitive info:", error);
+    res.status(500).json({ error: "Failed to delete sensitive info" });
   }
 });
 
@@ -1895,112 +1790,6 @@ app.put("/api/bank/accounts/:id", async (req, res) => {
   } catch (error) {
     console.error("Failed to update bank account:", error);
     res.status(500).json({ error: "Failed to update bank account" });
-  }
-});
-
-app.get("/api/credentials/accounts", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const bankAccountId = req.query.bankAccountId ? String(req.query.bankAccountId) : undefined;
-    const includePayload = String(req.query.includePayload || "") === "true";
-    const credentials = await prisma.bankAccountCredential.findMany({
-      where: {
-        userId,
-        ...(bankAccountId ? { bankAccountId } : {}),
-      },
-      select: {
-        id: true,
-        bankAccountId: true,
-        label: true,
-        encryptedPayload: includePayload,
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
-    res.json(credentials);
-  } catch (error) {
-    console.error("Failed to fetch account credentials:", error);
-    res.status(500).json({ error: "Failed to fetch account credentials" });
-  }
-});
-
-app.post("/api/credentials/accounts", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { bankAccountId, label, encryptedPayload } = req.body || {};
-    if (!bankAccountId || !encryptedPayload) {
-      res.status(400).json({ error: "bankAccountId and encryptedPayload are required" });
-      return;
-    }
-    const account = await prisma.bankAccount.findFirst({
-      where: { id: bankAccountId, userId },
-    });
-    if (!account) {
-      res.status(404).json({ error: "Bank account not found" });
-      return;
-    }
-    const record = await prisma.bankAccountCredential.upsert({
-      where: { bankAccountId },
-      update: { label: label || null, encryptedPayload, userId },
-      create: { bankAccountId, label: label || null, encryptedPayload, userId },
-    });
-    res.status(201).json({ success: true, data: record });
-  } catch (error) {
-    console.error("Failed to store account credentials:", error);
-    res.status(500).json({ error: "Failed to store account credentials" });
-  }
-});
-
-app.get("/api/credentials/cards", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const cardId = req.query.cardId ? String(req.query.cardId) : undefined;
-    const includePayload = String(req.query.includePayload || "") === "true";
-    const credentials = await prisma.cardCredential.findMany({
-      where: {
-        userId,
-        ...(cardId ? { cardId } : {}),
-      },
-      select: {
-        id: true,
-        cardId: true,
-        label: true,
-        encryptedPayload: includePayload,
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
-    res.json(credentials);
-  } catch (error) {
-    console.error("Failed to fetch card credentials:", error);
-    res.status(500).json({ error: "Failed to fetch card credentials" });
-  }
-});
-
-app.post("/api/credentials/cards", async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { cardId, label, encryptedPayload } = req.body || {};
-    if (!cardId || !encryptedPayload) {
-      res.status(400).json({ error: "cardId and encryptedPayload are required" });
-      return;
-    }
-    const card = await prisma.card.findFirst({ where: { id: cardId, userId } });
-    if (!card) {
-      res.status(404).json({ error: "Card not found" });
-      return;
-    }
-    const record = await prisma.cardCredential.upsert({
-      where: { cardId },
-      update: { label: label || null, encryptedPayload, userId },
-      create: { cardId, label: label || null, encryptedPayload, userId },
-    });
-    res.status(201).json({ success: true, data: record });
-  } catch (error) {
-    console.error("Failed to store card credentials:", error);
-    res.status(500).json({ error: "Failed to store card credentials" });
   }
 });
 
@@ -2864,6 +2653,109 @@ app.get("/api/transactions", async (req, res) => {
   }
 });
 
+app.get("/api/transactions/direct-debits", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const now = new Date();
+    const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const lastMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const nextMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const historyStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 6, 1));
+
+    const lastMonthTransactions = await prisma.bankTransaction.findMany({
+      where: {
+        userId,
+        providerTransactionId: { not: { startsWith: "manual-" } },
+        date: {
+          gte: lastMonthStart,
+          lt: currentMonthStart,
+        },
+      },
+    });
+
+    const lastMonthDirectDebits = lastMonthTransactions
+      .filter((tx) => isDirectDebitTransaction(tx))
+      .map((tx) => {
+        const raw = parseRawJson(tx.raw) || {};
+        const keyInfo = getDirectDebitKey(tx, raw);
+        return {
+          id: tx.id,
+          accountId: tx.accountId,
+          name: keyInfo.name,
+          reference: keyInfo.reference,
+          amount: Math.abs(tx.amount ?? 0),
+          currency: tx.currency || null,
+          description: tx.descriptionVia || raw.description || tx.merchant || null,
+          date: tx.date,
+        };
+      });
+
+    const historyTransactions = await prisma.bankTransaction.findMany({
+      where: {
+        userId,
+        providerTransactionId: { not: { startsWith: "manual-" } },
+        date: {
+          gte: historyStart,
+          lt: currentMonthStart,
+        },
+      },
+    });
+
+    const grouped = new Map();
+    for (const tx of historyTransactions) {
+      if (!isDirectDebitTransaction(tx)) continue;
+      const raw = parseRawJson(tx.raw) || {};
+      const keyInfo = getDirectDebitKey(tx, raw);
+      const entry = grouped.get(keyInfo.key) || {
+        key: keyInfo.key,
+        name: keyInfo.name,
+        reference: keyInfo.reference,
+        dates: [],
+        amounts: [],
+        lastSeen: null,
+        lastAmount: null,
+        accountIds: new Set(),
+      };
+      entry.dates.push(tx.date);
+      const amountValue = Math.abs(tx.amount ?? 0);
+      entry.amounts.push(amountValue);
+      if (!entry.lastSeen || tx.date > entry.lastSeen) {
+        entry.lastSeen = tx.date;
+        entry.lastAmount = amountValue;
+      }
+      entry.accountIds.add(tx.accountId);
+      grouped.set(keyInfo.key, entry);
+    }
+
+    const daysInNextMonth = new Date(Date.UTC(nextMonthStart.getUTCFullYear(), nextMonthStart.getUTCMonth() + 1, 0)).getUTCDate();
+    const upcoming = Array.from(grouped.values())
+      .filter((entry) => entry.lastSeen && entry.lastSeen >= lastMonthStart)
+      .map((entry) => {
+        const days = entry.dates
+          .map((value) => new Date(value).getUTCDate())
+          .sort((a, b) => a - b);
+        const medianDay = days.length ? days[Math.floor(days.length / 2)] : 1;
+        const dueDay = Math.min(medianDay, daysInNextMonth);
+        const expectedDate = new Date(Date.UTC(nextMonthStart.getUTCFullYear(), nextMonthStart.getUTCMonth(), dueDay));
+        const expectedAmount = entry.lastAmount ?? 0;
+        return {
+          name: entry.name,
+          reference: entry.reference,
+          expectedDate,
+          expectedAmount: Number(expectedAmount.toFixed(2)),
+          lastSeen: entry.lastSeen,
+          occurrences: entry.amounts.length,
+          accountIds: Array.from(entry.accountIds),
+        };
+      });
+
+    res.json({ lastMonth: lastMonthDirectDebits, upcoming });
+  } catch (error) {
+    console.error("Failed to fetch direct debits:", error);
+    res.status(500).json({ error: "Failed to fetch direct debits" });
+  }
+});
+
 app.get("/api/transactions/:id", async (req, res) => {
   try {
     const userId = req.user.id;
@@ -2916,8 +2808,8 @@ app.post("/api/transactions", async (req, res) => {
       return;
     }
     const transactionType = payload.transactionType || "expense";
-    const { account, card } = await resolveManualAccountForTransaction(userId, payload.cardId || null);
-    if (payload.cardId && !card) {
+    const { account, cardMeta } = await resolveManualAccountForTransaction(userId, payload.cardId || null);
+    if (payload.cardId && !cardMeta) {
       res.status(404).json({ error: "Card not found" });
       return;
     }
@@ -2940,7 +2832,7 @@ app.post("/api/transactions", async (req, res) => {
           descriptionVia: payload.description || null,
           date: payload.date ? new Date(payload.date) : new Date(),
           raw: buildManualRaw({
-            cardId: card?.id || null,
+            cardId: cardMeta?.id || null,
             transactionType,
             loanTo: payload.loanTo || null,
             loanFrom: payload.loanFrom || null,
@@ -2955,10 +2847,11 @@ app.post("/api/transactions", async (req, res) => {
             : undefined,
         },
       });
-      if (transactionType === "expense" && card?.id) {
-        await tx.card.update({
-          where: { id: card.id },
-          data: { balance: { increment: Math.abs(amountInput) } },
+      if (transactionType === "expense" && cardMeta?.id) {
+        const nextBalance = (cardMeta.balance ?? 0) + Math.abs(amountInput);
+        await tx.accountMeta.update({
+          where: { id: cardMeta.id },
+          data: { balance: nextBalance },
         });
       }
     });
@@ -2993,8 +2886,8 @@ app.put("/api/transactions/:id", async (req, res) => {
     const oldTransactionType = oldManualMeta?.transactionType || (oldTransaction.amount < 0 ? "expense" : "income");
     const nextCardId =
       payload.cardId === undefined ? oldCardId : payload.cardId ? String(payload.cardId) : null;
-    const { account, card } = await resolveManualAccountForTransaction(userId, nextCardId);
-    if (nextCardId && !card) {
+    const { account, cardMeta } = await resolveManualAccountForTransaction(userId, nextCardId);
+    if (nextCardId && !cardMeta) {
       res.status(404).json({ error: "Card not found" });
       return;
     }
@@ -3025,7 +2918,7 @@ app.put("/api/transactions/:id", async (req, res) => {
           descriptionVia: payload.description ?? oldTransaction.descriptionVia,
           date: payload.date ? new Date(payload.date) : oldTransaction.date,
           raw: buildManualRaw({
-            cardId: card?.id || null,
+            cardId: cardMeta?.id || null,
             transactionType: nextTransactionType,
             loanTo: payload.loanTo ?? oldManualMeta?.loanTo,
             loanFrom: payload.loanFrom ?? oldManualMeta?.loanFrom,
@@ -3049,15 +2942,22 @@ app.put("/api/transactions/:id", async (req, res) => {
       const oldEffect = oldTransactionType === "expense" ? Math.abs(oldTransaction.amount) : 0;
       const newEffect = nextTransactionType === "expense" ? Math.abs(signedAmount) : 0;
       if (oldCardId && oldEffect > 0) {
-        await tx.card.update({
-          where: { id: oldCardId },
-          data: { balance: { decrement: oldEffect } },
+        const oldMeta = await tx.accountMeta.findFirst({
+          where: { id: oldCardId, userId },
         });
+        if (oldMeta) {
+          const nextBalance = Math.max(0, (oldMeta.balance ?? 0) - oldEffect);
+          await tx.accountMeta.update({
+            where: { id: oldMeta.id },
+            data: { balance: nextBalance },
+          });
+        }
       }
-      if (card?.id && newEffect > 0) {
-        await tx.card.update({
-          where: { id: card.id },
-          data: { balance: { increment: newEffect } },
+      if (cardMeta?.id && newEffect > 0) {
+        const nextBalance = (cardMeta.balance ?? 0) + newEffect;
+        await tx.accountMeta.update({
+          where: { id: cardMeta.id },
+          data: { balance: nextBalance },
         });
       }
     });
@@ -3092,10 +2992,16 @@ app.delete("/api/transactions/:id", async (req, res) => {
     await prisma.$transaction(async (tx) => {
       await tx.bankTransaction.delete({ where: { id: req.params.id } });
       if (transactionType === "expense" && cardId) {
-        await tx.card.update({
-          where: { id: cardId },
-          data: { balance: { decrement: Math.abs(existing.amount) } },
+        const accountMeta = await tx.accountMeta.findFirst({
+          where: { id: cardId, userId },
         });
+        if (accountMeta) {
+          const nextBalance = Math.max(0, (accountMeta.balance ?? 0) - Math.abs(existing.amount));
+          await tx.accountMeta.update({
+            where: { id: accountMeta.id },
+            data: { balance: nextBalance },
+          });
+        }
       }
     });
     res.status(204).send();
@@ -3207,7 +3113,9 @@ app.get("/api/insights", async (req, res) => {
   try {
     const userId = req.user.id;
     const insights = [];
-    const cards = await prisma.card.findMany({ where: { userId } });
+    const cards = await prisma.accountMeta.findMany({
+      where: { userId, accountType: "CREDIT_CARD" },
+    });
     const transactions = await prisma.bankTransaction.findMany({
       where: {
         userId,
@@ -3217,8 +3125,8 @@ app.get("/api/insights", async (req, res) => {
       },
     });
 
-    const totalBalance = cards.reduce((acc, card) => acc + card.balance, 0);
-    const totalLimit = cards.reduce((acc, card) => acc + card.limit, 0);
+    const totalBalance = cards.reduce((acc, card) => acc + (card.balance || 0), 0);
+    const totalLimit = cards.reduce((acc, card) => acc + (card.limit || 0), 0);
     const utilization = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : 0;
 
     if (utilization > 80) {
@@ -3236,10 +3144,10 @@ app.get("/api/insights", async (req, res) => {
     }
 
     const cardUtilizations = cards
-      .filter((card) => card.limit > 0)
+      .filter((card) => (card.limit || 0) > 0)
       .map((card) => ({
         card,
-        utilization: (card.balance / card.limit) * 100,
+        utilization: ((card.balance || 0) / (card.limit || 1)) * 100,
       }))
       .sort((a, b) => b.utilization - a.utilization);
 
@@ -3247,7 +3155,7 @@ app.get("/api/insights", async (req, res) => {
       insights.push({
         type: "tip",
         title: "Card Balance Alert",
-        message: `Your ${cardUtilizations[0].card.name} has a ${cardUtilizations[0].utilization.toFixed(1)}% utilization. Consider paying it down to free up credit.`,
+        message: `Your ${cardUtilizations[0].card.label} has a ${cardUtilizations[0].utilization.toFixed(1)}% utilization. Consider paying it down to free up credit.`,
       });
     }
 

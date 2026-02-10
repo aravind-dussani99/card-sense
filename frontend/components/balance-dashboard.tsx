@@ -13,7 +13,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Download } from "lucide-react";
-import { getMonthToDateRange } from "@/lib/utils";
+import { formatAmount, getMonthToDateRange } from "@/lib/utils";
 
 type TransactionItem = {
     id: string;
@@ -685,7 +685,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                 <CardTitle className="text-sm font-medium text-muted-foreground">Total Expenses</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-red-600">${kpis.totalExpenses.toFixed(2)}</div>
+                                <div className="text-2xl font-bold text-red-600">{formatAmount(kpis.totalExpenses, { currency: "$" })}</div>
                                 <p className="text-xs text-muted-foreground mt-1">All expense transactions</p>
                             </CardContent>
                         </Card>
@@ -694,7 +694,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                 <CardTitle className="text-sm font-medium text-muted-foreground">Total Card Balance</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-orange-600">${kpis.totalCardBalance.toFixed(2)}</div>
+                                <div className="text-2xl font-bold text-orange-600">{formatAmount(kpis.totalCardBalance, { currency: "$" })}</div>
                                 <p className="text-xs text-muted-foreground mt-1">Outstanding on all cards</p>
                             </CardContent>
                         </Card>
@@ -703,7 +703,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                 <CardTitle className="text-sm font-medium text-muted-foreground">Available Credit</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-green-600">${kpis.availableCredit.toFixed(2)}</div>
+                                <div className="text-2xl font-bold text-green-600">{formatAmount(kpis.availableCredit, { currency: "$" })}</div>
                                 <p className="text-xs text-muted-foreground mt-1">{kpis.creditUtilization.toFixed(1)}% utilized</p>
                             </CardContent>
                         </Card>
@@ -761,7 +761,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                                 <td className="p-2">{idx + 1}</td>
                                                 <td className="p-2">{card.name}</td>
                                                 <td className="p-2">Card</td>
-                                                <td className="p-2">${card.outstanding.toFixed(2)}</td>
+                                                <td className="p-2">{formatAmount(card.outstanding, { currency: "$" })}</td>
                                                 <td className="p-2">{card.outstanding > 0 ? 'Payable' : 'Settled'}</td>
                                             </tr>
                                         ))}
@@ -771,7 +771,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                                 <td className="p-2">{loan.person}</td>
                                                 <td className="p-2">Loan</td>
                                                 <td className={`p-2 ${loan.outstanding < 0 ? 'text-red-600' : ''}`}>
-                                                    ${loan.outstanding.toFixed(2)}
+                                                    {formatAmount(loan.outstanding, { currency: "$" })}
                                                 </td>
                                                 <td className={`p-2 ${loan.outstanding < 0 ? 'text-red-600' : ''}`}>
                                                     {loan.outstanding > 0 ? 'Payable' : loan.outstanding < 0 ? 'Receivable' : 'Settled'}
@@ -805,20 +805,20 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                             <div className="rounded-lg border bg-white/60 p-3">
                                 <p className="text-xs text-muted-foreground">Total amount</p>
                                 <p className="text-xl font-semibold">
-                                    £{merchantKpis.totalAmount.toFixed(2)}
+                                    {formatAmount(merchantKpis.totalAmount, { currency: "£" })}
                                 </p>
                             </div>
                             <div className="rounded-lg border bg-white/60 p-3">
                                 <p className="text-xs text-muted-foreground">Credits</p>
-                                <p className="text-xl font-semibold text-emerald-600">£{merchantKpis.credit.toFixed(2)}</p>
+                                <p className="text-xl font-semibold text-emerald-600">{formatAmount(merchantKpis.credit, { currency: "£" })}</p>
                             </div>
                             <div className="rounded-lg border bg-white/60 p-3">
                                 <p className="text-xs text-muted-foreground">Debits</p>
-                                <p className="text-xl font-semibold text-rose-600">£{merchantKpis.debit.toFixed(2)}</p>
+                                <p className="text-xl font-semibold text-rose-600">{formatAmount(merchantKpis.debit, { currency: "£" })}</p>
                             </div>
                             <div className="rounded-lg border bg-white/60 p-3">
                                 <p className="text-xs text-muted-foreground">Avg amount</p>
-                                <p className="text-xl font-semibold">£{merchantKpis.average.toFixed(2)}</p>
+                                <p className="text-xl font-semibold">{formatAmount(merchantKpis.average, { currency: "£" })}</p>
                             </div>
                         </div>
 
@@ -897,7 +897,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                             <td className="p-3">{t.descriptionVia || t.description || "—"}</td>
                                             <td className="p-3">{t.merchantTo || t.merchant || "—"}</td>
                                             <td className="p-3 text-right font-semibold">
-                                                £{t.amount.toFixed(2)}
+                                                {formatAmount(t.amount, { currency: "£" })}
                                             </td>
                                         </tr>
                                     ))}
@@ -918,9 +918,9 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                     <CardTitle className="text-sm font-medium">{card.name}</CardTitle>
                                 </CardHeader>
                                 <CardContent>
-                                    <div className="text-2xl font-bold">${card.outstanding.toFixed(2)}</div>
+                                    <div className="text-2xl font-bold">{formatAmount(card.outstanding, { currency: "$" })}</div>
                                     <p className="text-xs text-muted-foreground mt-1">
-                                        {card.utilization.toFixed(1)}% of ${(card.limit ?? 0).toFixed(2)} limit
+                                        {card.utilization.toFixed(1)}% of {formatAmount(card.limit ?? 0, { currency: "$" })} limit
                                     </p>
                                 </CardContent>
                             </Card>
@@ -969,7 +969,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                                             </td>
                                                             <td className="p-2">{transaction.merchantTo || transaction.merchant}</td>
                                                             <td className="p-2">{transaction.category}</td>
-                                                            <td className="p-2">${transaction.amount.toFixed(2)}</td>
+                                                            <td className="p-2">{formatAmount(transaction.amount, { currency: "$" })}</td>
                                                         </tr>
                                                     ))}
                                     </tbody>
@@ -990,7 +990,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                     <CardTitle className="text-sm font-medium">{cat.category}</CardTitle>
                                 </CardHeader>
                                 <CardContent>
-                                    <div className="text-2xl font-bold">${cat.total.toFixed(2)}</div>
+                                    <div className="text-2xl font-bold">{formatAmount(cat.total, { currency: "$" })}</div>
                                     <p className="text-xs text-muted-foreground mt-1">{cat.count} transactions</p>
                                 </CardContent>
                             </Card>
@@ -1035,7 +1035,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                                     <td className="p-2">{transaction.category}</td>
                                                     <td className="p-2">{transaction.subCategory || 'N/A'}</td>
                                                     <td className="p-2">{transaction.merchant}</td>
-                                                    <td className="p-2">${transaction.amount.toFixed(2)}</td>
+                                                    <td className="p-2">{formatAmount(transaction.amount, { currency: "$" })}</td>
                                                 </tr>
                                             ))}
                                     </tbody>
@@ -1055,7 +1055,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                 <CardTitle className="text-sm font-medium text-muted-foreground">Total Loans Given</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-blue-600">${kpis.totalLoansGiven.toFixed(2)}</div>
+                                <div className="text-2xl font-bold text-blue-600">{formatAmount(kpis.totalLoansGiven, { currency: "$" })}</div>
                                 <p className="text-xs text-muted-foreground mt-1">Money you lent to others</p>
                             </CardContent>
                         </Card>
@@ -1064,7 +1064,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                 <CardTitle className="text-sm font-medium text-muted-foreground">Total Loans Received</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold text-green-600">${kpis.totalLoansReceived.toFixed(2)}</div>
+                                <div className="text-2xl font-bold text-green-600">{formatAmount(kpis.totalLoansReceived, { currency: "$" })}</div>
                                 <p className="text-xs text-muted-foreground mt-1">Money you borrowed</p>
                             </CardContent>
                         </Card>
@@ -1074,7 +1074,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                             </CardHeader>
                             <CardContent>
                                 <div className={`text-2xl font-bold ${kpis.netLoans < 0 ? 'text-red-600' : 'text-orange-600'}`}>
-                                    ${Math.abs(kpis.netLoans).toFixed(2)}
+                                    {formatAmount(Math.abs(kpis.netLoans), { currency: "$" })}
                                 </div>
                                 <p className="text-xs text-muted-foreground mt-1">
                                     {kpis.netLoans < 0 ? 'You are owed' : 'You owe'}
@@ -1125,10 +1125,10 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                         {loanOutstanding.map(loan => (
                                             <tr key={loan.person} className="border-b">
                                                 <td className="p-2">{loan.person}</td>
-                                                <td className="p-2">${loan.given.toFixed(2)}</td>
-                                                <td className="p-2">${loan.received.toFixed(2)}</td>
+                                                <td className="p-2">{formatAmount(loan.given, { currency: "$" })}</td>
+                                                <td className="p-2">{formatAmount(loan.received, { currency: "$" })}</td>
                                                 <td className={`p-2 ${loan.outstanding < 0 ? 'text-red-600' : ''}`}>
-                                                    ${loan.outstanding.toFixed(2)}
+                                                    {formatAmount(loan.outstanding, { currency: "$" })}
                                                 </td>
                                                 <td className={`p-2 ${loan.outstanding < 0 ? 'text-red-600' : ''}`}>
                                                     {loan.outstanding > 0 ? 'Payable' : loan.outstanding < 0 ? 'Receivable' : 'Settled'}
@@ -1182,7 +1182,7 @@ export function BalanceDashboard({ cards, accounts, categories, initialTransacti
                                                     <td className="p-2">
                                                         {transaction.transactionType === "loan_given" ? transaction.loanTo : transaction.loanFrom}
                                                     </td>
-                                                    <td className="p-2">${transaction.amount.toFixed(2)}</td>
+                                                    <td className="p-2">{formatAmount(transaction.amount, { currency: "$" })}</td>
                                                     <td className="p-2">{transaction.description || 'N/A'}</td>
                                                 </tr>
                                             ))}

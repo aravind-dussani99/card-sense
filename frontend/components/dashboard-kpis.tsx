@@ -4,6 +4,7 @@ import { Eye, EyeOff, DollarSign, CreditCard, Wallet, ShieldAlert } from "lucide
 import { useBalanceVisibility } from "@/lib/balance-visibility";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
+import { formatAmount } from "@/lib/utils";
 
 type DashboardKpisProps = {
   netAvailable: number;
@@ -16,10 +17,13 @@ type DashboardKpisProps = {
   creditAvailable: number;
   creditLimit: number;
   creditUsed: number;
+  onBankClick?: () => void;
+  onOverdraftClick?: () => void;
+  onCreditClick?: () => void;
 };
 
 const formatMoney = (value: number, hidden: boolean) =>
-  hidden ? "•••" : `£${value.toFixed(2)}`;
+  hidden ? "•••" : formatAmount(value, { currency: "£" });
 
 export function DashboardKpis(props: DashboardKpisProps) {
   const {
@@ -33,39 +37,70 @@ export function DashboardKpis(props: DashboardKpisProps) {
     creditAvailable,
     creditLimit,
     creditUsed,
+    onBankClick,
+    onOverdraftClick,
+    onCreditClick,
   } = props;
 
   const visibility = useBalanceVisibility();
   const hidden = !visibility.visible;
 
+  const KpiWrapper = ({
+    href,
+    onClick,
+    children,
+  }: {
+    href: string;
+    onClick?: () => void;
+    children: React.ReactNode;
+  }) => {
+    if (onClick) {
+      return (
+        <div className="group h-full cursor-pointer" onClick={onClick} role="button" tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onClick();
+            }
+          }}
+        >
+          {children}
+        </div>
+      );
+    }
+    return (
+      <Link href={href} className="group h-full">
+        {children}
+      </Link>
+    );
+  };
+
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
-      <Link href="/cards#bank-accounts" className="group h-full">
-        <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Net Available Balance</CardTitle>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-slate-900"
-                onClick={(e) => {
-                  e.preventDefault();
-                  visibility.toggle();
-                }}
-              >
-                {hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-              </button>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </div>
-          </CardHeader>
-          <CardContent className="flex-1">
-            <div className="text-2xl font-bold">{formatMoney(netAvailable, hidden)}</div>
-            <p className="text-xs text-muted-foreground">
-              After credit/overdraft payables.
-            </p>
-          </CardContent>
-        </Card>
-      </Link>
+      <Card className="h-full flex flex-col">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Net Available Balance</CardTitle>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-slate-900"
+              onClick={(e) => {
+                e.preventDefault();
+                visibility.toggle();
+              }}
+            >
+              {hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            </button>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardHeader>
+        <CardContent className="flex-1">
+          <div className="text-2xl font-bold">{formatMoney(netAvailable, hidden)}</div>
+          <p className="text-xs text-muted-foreground">
+            After credit/overdraft payables.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card className="h-full flex flex-col">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -93,7 +128,7 @@ export function DashboardKpis(props: DashboardKpisProps) {
         </CardContent>
       </Card>
 
-      <Link href="/cards#bank-accounts" className="group h-full">
+      <KpiWrapper href="/cards#bank-accounts" onClick={onBankClick}>
         <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Bank Account Balance</CardTitle>
@@ -104,9 +139,9 @@ export function DashboardKpis(props: DashboardKpisProps) {
             <p className="text-xs text-muted-foreground">Available across bank accounts.</p>
           </CardContent>
         </Card>
-      </Link>
+      </KpiWrapper>
 
-      <Link href="/cards#overdraft-accounts" className="group h-full">
+      <KpiWrapper href="/cards#overdraft-accounts" onClick={onOverdraftClick}>
         <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Overdraft Balance</CardTitle>
@@ -119,9 +154,9 @@ export function DashboardKpis(props: DashboardKpisProps) {
             </p>
           </CardContent>
         </Card>
-      </Link>
+      </KpiWrapper>
 
-      <Link href="/cards#credit-cards" className="group h-full">
+      <KpiWrapper href="/cards#credit-cards" onClick={onCreditClick}>
         <Card className="group-hover:border-primary/40 transition-colors h-full flex flex-col">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Credit Card Balance</CardTitle>
@@ -134,7 +169,7 @@ export function DashboardKpis(props: DashboardKpisProps) {
             </p>
           </CardContent>
         </Card>
-      </Link>
+      </KpiWrapper>
     </div>
   );
 }

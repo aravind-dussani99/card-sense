@@ -13,13 +13,18 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Eye, EyeOff, Plus, X } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Eye } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { decryptPayload, encryptPayload, passphraseMarkerExists } from "@/lib/vault";
-import { updateBankAccount } from "@/app/actions/bank-actions";
-import { createBankAccountCredential } from "@/app/actions/credential-actions";
 
 type BankAccountDisplay = {
   id: string;
@@ -51,35 +56,143 @@ type AccountCredentials = {
   password?: string;
   passphrase?: string;
   memorableInfo?: string;
-  authDetails?: string;
   statementPassword?: string;
+  fullCardNumber?: string;
+  nameOnCard?: string;
+  expiryDate?: string;
+  cvv?: string;
 };
 
 type CredentialRecord = {
+  id?: string;
   encryptedPayload?: string | null;
 };
+
+const MAX_DOCUMENT_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_DOCUMENT_SIZE_LABEL = "5 MB";
+const AUTO_LOCK_MS = 2 * 60 * 1000;
+const inferAccountType = (value?: string | null) => {
+  const normalized = (value || "").toLowerCase();
+  if (normalized.includes("overdraft")) return "OVERDRAFT";
+  if (normalized.includes("card") || normalized.includes("credit")) return "CREDIT_CARD";
+  if (normalized.includes("debit")) return "DEBIT_CARD";
+  return "BANK_ACCOUNT";
+};
+const parseDateList = (value?: string | null) => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+};
+const getMedianDay = (dates: string[]) => {
+  const days = dates
+    .map((value) => new Date(value))
+    .filter((value) => !Number.isNaN(value.getTime()))
+    .map((value) => value.getDate())
+    .sort((a, b) => a - b);
+  if (!days.length) return null;
+  const mid = Math.floor(days.length / 2);
+  return days.length % 2 === 0 ? Math.round((days[mid - 1] + days[mid]) / 2) : days[mid];
+};
+const predictNextDate = (history: string[], reference = new Date()) => {
+  const medianDay = getMedianDay(history);
+  if (!medianDay) return "";
+  const year = reference.getFullYear();
+  const month = reference.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const clampedDay = Math.min(medianDay, daysInMonth);
+  const candidate = new Date(year, month, clampedDay);
+  if (candidate < reference) {
+    const nextMonth = new Date(year, month + 1, 1);
+    const nextMonthDays = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0).getDate();
+    const nextDay = Math.min(medianDay, nextMonthDays);
+    return new Date(nextMonth.getFullYear(), nextMonth.getMonth(), nextDay).toISOString().slice(0, 10);
+  }
+  return candidate.toISOString().slice(0, 10);
+};
+const pushDateHistory = (current: string[], nextValue: string) => {
+  if (!nextValue) return current;
+  const trimmed = nextValue.trim();
+  const next = [...current.filter((entry) => entry !== trimmed), trimmed];
+  return next.slice(-3);
+};
+const formatAmountInput = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return "";
+  return Number(value).toFixed(2);
+};
+const parseHolderName = (value: string | null | undefined) => {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return "";
+  const match = trimmed.match(/^(.+?)\s*\([^)]*\)\s*$/);
+  return match ? match[1].trim() : trimmed;
+};
+
+const serializeSnapshot = ({
+  accountData,
+  accountMetaData,
+  secureData,
+  secureUnlocked,
+}: {
+  accountData: Record<string, unknown>;
+  accountMetaData: Record<string, unknown>;
+  secureData: Record<string, unknown>;
+  secureUnlocked: boolean;
+}) =>
+  JSON.stringify({
+    accountData,
+    accountMetaData,
+    secureData: secureUnlocked ? secureData : {},
+  });
 
 export function ViewAccountDialog({
   account,
   triggerVariant = "default",
+  context = "bank",
 }: {
   account: BankAccountDisplay;
   triggerVariant?: "default" | "icon";
+  context?: "bank" | "overdraft" | "card";
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [passphraseReady, setPassphraseReady] = useState(false);
   const [passphrase, setPassphrase] = useState("");
+  const [passphraseVisible, setPassphraseVisible] = useState(false);
   const [secureUnlocked, setSecureUnlocked] = useState(false);
   const [secureError, setSecureError] = useState<string | null>(null);
   const [secureData, setSecureData] = useState<AccountCredentials>({});
+  const [accountMetaId, setAccountMetaId] = useState<string | null>(null);
+  const [sensitiveInfoId, setSensitiveInfoId] = useState<string | null>(null);
+  const [documentError, setDocumentError] = useState<string | null>(null);
+  const [statusDialog, setStatusDialog] = useState<{ title: string; message: string } | null>(null);
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
+  const [metaLoaded, setMetaLoaded] = useState(false);
+  const [snapshotIncludesSecure, setSnapshotIncludesSecure] = useState(false);
+  const [accountMetaData, setAccountMetaData] = useState({
+    accountHolderName: "",
+    bankName: "",
+    accountType: "BANK_ACCOUNT",
+    internationalAccountNumber: "",
+    cardLast4: "",
+    accountNumber: "",
+    sortCode: "",
+    documentImageUrls: [] as string[],
+    last3StatementDates: "[]",
+    last3DueDates: "[]",
+  });
   const [shareOpen, setShareOpen] = useState(false);
+  const [copyNoticeOpen, setCopyNoticeOpen] = useState(false);
+  const [documentPreviewIndex, setDocumentPreviewIndex] = useState<number | null>(null);
+  const [statementDateInput, setStatementDateInput] = useState("");
+  const [statementDueDateInput, setStatementDueDateInput] = useState("");
   const [accountData, setAccountData] = useState({
     name: account.name || "",
     type: account.type || "account",
     currency: account.currency || "",
     mask: account.mask || "",
-    bankName: account.tags?.startsWith("bank:") ? account.tags.replace("bank:", "") : "",
     accountNumber: account.accountNumber || "",
     sortCode: account.sortCode || "",
     statementBalance: account.statementBalance ?? 0,
@@ -93,12 +206,68 @@ export function ViewAccountDialog({
 
   const bankLabel = useMemo(() => {
     if (account.connection?.institutionId) return account.connection.institutionId;
-    if (account.connection?.provider) return account.connection.provider;
     if (account.tags?.startsWith("bank:")) return account.tags.replace("bank:", "");
+    if (account.name) return account.name;
     return "Bank";
-  }, [account.connection, account.tags]);
+  }, [account.connection, account.tags, account.name]);
 
   const isCardType = useMemo(() => (accountData.type || "").toLowerCase().includes("card"), [accountData.type]);
+  const isCardAccount = context === "card" || isCardType;
+  const isReadOnlyMask = Boolean(account.mask);
+  const isReadOnlyAccountNumber = Boolean(account.accountNumber);
+  const isReadOnlySortCode = Boolean(account.sortCode);
+  const isReadOnlyCurrency = Boolean(account.currency);
+  const isReadOnlyBalance = typeof account.balance === "number";
+  const isReadOnlyAvailableBalance = typeof account.availableBalance === "number";
+  const isReadOnlyLimit = typeof account.limit === "number";
+  const isOverdraftAccount = useMemo(() => {
+    if (context === "overdraft") return true;
+    const type = (account.type || "").toLowerCase();
+    const name = (account.name || "").toLowerCase();
+    return !isCardAccount && (type.includes("overdraft") || name.includes("overdraft") || (account.limit ?? 0) > 0);
+  }, [account.type, account.name, account.limit, context, isCardAccount]);
+  const overdraftUsed = useMemo(() => {
+    if (!isOverdraftAccount || typeof accountData.limit !== "number") return 0;
+    const available = typeof accountData.availableBalance === "number" ? accountData.availableBalance : accountData.limit;
+    return Math.max(0, accountData.limit - available);
+  }, [accountData.availableBalance, accountData.limit, isOverdraftAccount]);
+  const overdraftRemaining = useMemo(() => {
+    if (!isOverdraftAccount || typeof accountData.limit !== "number") return accountData.availableBalance;
+    return Math.max(0, accountData.limit - overdraftUsed);
+  }, [accountData.availableBalance, accountData.limit, isOverdraftAccount, overdraftUsed]);
+  const displayBalance = useMemo(() => {
+    if (isCardAccount) {
+      if (typeof accountData.limit === "number" && typeof accountData.availableBalance === "number") {
+        return Math.max(0, accountData.limit - accountData.availableBalance);
+      }
+      return accountData.balance;
+    }
+    if (context === "bank" && typeof accountData.limit === "number" && accountData.limit > 0) {
+      if (typeof accountData.balance === "number") return accountData.balance;
+      if (typeof accountData.availableBalance === "number") return accountData.availableBalance - accountData.limit;
+    }
+    return isOverdraftAccount ? overdraftUsed : accountData.balance;
+  }, [
+    accountData.availableBalance,
+    accountData.balance,
+    accountData.limit,
+    context,
+    isCardAccount,
+    isOverdraftAccount,
+    overdraftUsed,
+  ]);
+  const displayAvailableBalance = useMemo(() => {
+    if (isCardAccount) return accountData.availableBalance;
+    if (context === "bank" && typeof accountData.limit === "number" && accountData.limit > 0) {
+      if (typeof accountData.balance === "number") return accountData.balance;
+      if (typeof accountData.availableBalance === "number") return accountData.availableBalance - accountData.limit;
+    }
+    return isOverdraftAccount ? overdraftRemaining : accountData.availableBalance;
+  }, [accountData.availableBalance, accountData.balance, accountData.limit, context, isCardAccount, isOverdraftAccount, overdraftRemaining]);
+  const displayLimit = isCardAccount || isOverdraftAccount ? accountData.limit : 0;
+  const balanceLabel = isCardAccount || isOverdraftAccount ? "Used Balance" : "Current Balance";
+  const availableLabel = "Available Balance";
+  const limitLabel = isOverdraftAccount ? "Overdraft Limit" : "Limit";
   const computedPayable = useMemo(() => {
     const statementBalance = Number(accountData.statementBalance) || 0;
     const paidManual = Number(accountData.statementPaidAmount) || 0;
@@ -120,14 +289,18 @@ export function ViewAccountDialog({
       setPassphraseReady(passphraseMarkerExists());
       setSecureUnlocked(false);
       setSecureError(null);
+      setDocumentError(null);
+      setDocumentPreviewIndex(null);
       setPassphrase("");
       setSecureData({});
+      setInitialSnapshot(null);
+      setMetaLoaded(false);
+      setSnapshotIncludesSecure(false);
       setAccountData({
         name: account.name || "",
         type: account.type || "account",
         currency: account.currency || "",
         mask: account.mask || "",
-        bankName: account.tags?.startsWith("bank:") ? account.tags.replace("bank:", "") : "",
         accountNumber: account.accountNumber || "",
         sortCode: account.sortCode || "",
         statementBalance: account.statementBalance ?? 0,
@@ -138,8 +311,135 @@ export function ViewAccountDialog({
         availableBalance: account.availableBalance ?? account.balance ?? 0,
         limit: account.limit ?? 0,
       });
+      const loadMeta = async () => {
+        try {
+          const meta = await apiFetch<Array<{
+            id: string;
+            accountHolderName?: string | null;
+            bankName?: string | null;
+            accountType?: string;
+            internationalAccountNumber?: string | null;
+            cardLast4?: string | null;
+            accountNumber?: string | null;
+            sortCode?: string | null;
+            documentImageUrls?: string[] | null;
+            last3StatementDates?: string | null;
+            last3DueDates?: string | null;
+          }>>(`/api/account-meta?linkedBankAccountId=${encodeURIComponent(account.id)}`);
+          if (meta && meta.length) {
+            const record = meta[0];
+            const fallbackHolderName = parseHolderName(account.name);
+            const statementDates = parseDateList(record.last3StatementDates);
+            const dueDates = parseDateList(record.last3DueDates);
+            setAccountMetaId(record.id);
+            setAccountMetaData({
+              accountHolderName: parseHolderName(record.accountHolderName) || fallbackHolderName,
+              bankName: record.bankName || bankLabel,
+              accountType: record.accountType || inferAccountType(account.type || ""),
+              internationalAccountNumber: record.internationalAccountNumber || account.mask || "",
+              cardLast4: record.cardLast4 || account.mask || "",
+              accountNumber: record.accountNumber || account.accountNumber || "",
+              sortCode: record.sortCode || account.sortCode || "",
+              documentImageUrls: record.documentImageUrls || [],
+              last3StatementDates: record.last3StatementDates || "[]",
+              last3DueDates: record.last3DueDates || "[]",
+            });
+            setStatementDateInput(
+              account.statementDate ? account.statementDate.slice(0, 10) : predictNextDate(statementDates)
+            );
+            setStatementDueDateInput(
+              account.statementDueDate ? account.statementDueDate.slice(0, 10) : predictNextDate(dueDates)
+            );
+          } else {
+            const fallbackHolderName = parseHolderName(account.name);
+            setAccountMetaId(null);
+            setAccountMetaData({
+              accountHolderName: fallbackHolderName,
+              bankName: bankLabel,
+              accountType: inferAccountType(account.type || ""),
+              internationalAccountNumber: account.mask || "",
+              cardLast4: account.mask || "",
+              accountNumber: account.accountNumber || "",
+              sortCode: account.sortCode || "",
+              documentImageUrls: [],
+              last3StatementDates: "[]",
+              last3DueDates: "[]",
+            });
+            setStatementDateInput(
+              account.statementDate ? account.statementDate.slice(0, 10) : predictNextDate([])
+            );
+            setStatementDueDateInput(
+              account.statementDueDate ? account.statementDueDate.slice(0, 10) : predictNextDate([])
+            );
+          }
+        } catch (error) {
+          console.error("Failed to load account metadata", error);
+        } finally {
+          setMetaLoaded(true);
+        }
+      };
+      void loadMeta();
     }
   }, [open, account]);
+
+  useEffect(() => {
+    if (!open || !metaLoaded || initialSnapshot !== null) return;
+    setInitialSnapshot(
+      serializeSnapshot({
+        accountData,
+        accountMetaData,
+        secureData,
+        secureUnlocked,
+      })
+    );
+  }, [accountData, accountMetaData, initialSnapshot, metaLoaded, open, secureData, secureUnlocked]);
+
+  const lockSensitive = () => {
+    setSecureUnlocked(false);
+    setSecureData({});
+    setSecureError(null);
+  };
+
+  useEffect(() => {
+    if (!secureUnlocked) return;
+    const timeout = setTimeout(() => {
+      lockSensitive();
+    }, AUTO_LOCK_MS);
+    return () => clearTimeout(timeout);
+  }, [secureUnlocked]);
+
+  const isDirty =
+    initialSnapshot !== null &&
+    serializeSnapshot({
+      accountData,
+      accountMetaData,
+      secureData,
+      secureUnlocked,
+    }) !== initialSnapshot;
+
+  const ensureAccountMeta = async () => {
+    if (accountMetaId) return accountMetaId;
+      const created = await apiFetch<{ id: string }>(`/api/account-meta`, {
+        method: "POST",
+        body: JSON.stringify({
+          linkedBankAccountId: account.id,
+          accountHolderName: accountMetaData.accountHolderName || undefined,
+          bankName: accountMetaData.bankName || undefined,
+          accountType: accountMetaData.accountType || inferAccountType(account.type || ""),
+          internationalAccountNumber: accountMetaData.internationalAccountNumber || undefined,
+          cardLast4: accountMetaData.cardLast4 || undefined,
+          accountNumber: accountMetaData.accountNumber || undefined,
+          sortCode: accountMetaData.sortCode || undefined,
+          documentImageUrls: accountMetaData.documentImageUrls,
+          last3StatementDates: accountMetaData.last3StatementDates || undefined,
+          last3DueDates: accountMetaData.last3DueDates || undefined,
+          label: accountData.name || account.name || "Account",
+        }),
+      });
+    const metaId = created?.id || null;
+    setAccountMetaId(metaId);
+    return metaId;
+  };
 
   const handleUnlock = async () => {
     setSecureError(null);
@@ -152,12 +452,29 @@ export function ViewAccountDialog({
       return;
     }
     try {
+      const metaId = await ensureAccountMeta();
+      if (!metaId) {
+        setSecureError("Save account details before unlocking sensitive fields.");
+        return;
+      }
       const payloads = await apiFetch<CredentialRecord[]>(
-        `/api/credentials/accounts?bankAccountId=${encodeURIComponent(account.id)}&includePayload=true`
+        `/api/sensitive-info?accountMetaId=${encodeURIComponent(metaId)}&includePayload=true`
       );
       const payload = payloads?.[0]?.encryptedPayload;
+      setSensitiveInfoId(payloads?.[0]?.id || null);
       if (payload) {
         const decrypted = await decryptPayload(passphrase, payload);
+        if (!snapshotIncludesSecure) {
+          setInitialSnapshot(
+            serializeSnapshot({
+              accountData,
+              accountMetaData,
+              secureData: decrypted,
+              secureUnlocked: true,
+            })
+          );
+          setSnapshotIncludesSecure(true);
+        }
         setSecureData({
           label: decrypted.label,
           username: decrypted.username,
@@ -165,8 +482,11 @@ export function ViewAccountDialog({
           password: decrypted.password,
           passphrase: decrypted.passphrase,
           memorableInfo: decrypted.memorableInfo,
-          authDetails: decrypted.authDetails,
           statementPassword: decrypted.statementPassword,
+          fullCardNumber: decrypted.fullCardNumber,
+          nameOnCard: decrypted.nameOnCard,
+          expiryDate: decrypted.expiryDate,
+          cvv: decrypted.cvv,
         });
       }
       setSecureUnlocked(true);
@@ -180,32 +500,65 @@ export function ViewAccountDialog({
     setSaving(true);
     setSecureError(null);
     try {
-      const tagName = accountData.bankName ? `bank:${accountData.bankName}` : account.tags || null;
-      const updateResult = await updateBankAccount(account.id, {
-        name: accountData.name || undefined,
-        type: accountData.type || undefined,
-        currency: accountData.currency || undefined,
-        mask: accountData.mask || undefined,
-        tags: tagName || undefined,
-        accountNumber: accountData.accountNumber || undefined,
-        sortCode: accountData.sortCode || undefined,
-        statementBalance: Number(accountData.statementBalance) || 0,
-        statementDate: accountData.statementDate || undefined,
-        statementDueDate: accountData.statementDueDate || undefined,
-        statementPaidAmount: Number(accountData.statementPaidAmount) || 0,
-        balance: Number(accountData.balance) || 0,
-        availableBalance: Number(accountData.availableBalance) || 0,
-        limit: Number(accountData.limit) || 0,
-      });
-      if (updateResult?.success === false) {
-        throw new Error(updateResult.error || "Failed to update account.");
+      let metaId = accountMetaId;
+      if (metaId) {
+        await apiFetch(`/api/account-meta/${metaId}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            linkedBankAccountId: account.id,
+            accountHolderName: accountMetaData.accountHolderName || undefined,
+            bankName: accountMetaData.bankName || undefined,
+            accountType: accountMetaData.accountType || inferAccountType(account.type || ""),
+            internationalAccountNumber: accountMetaData.internationalAccountNumber || undefined,
+            cardLast4: accountMetaData.cardLast4 || undefined,
+            accountNumber: accountMetaData.accountNumber || undefined,
+            sortCode: accountMetaData.sortCode || undefined,
+            documentImageUrls: accountMetaData.documentImageUrls,
+            last3StatementDates: accountMetaData.last3StatementDates || undefined,
+            last3DueDates: accountMetaData.last3DueDates || undefined,
+            label: accountData.name || account.name || "Account",
+          }),
+        });
+      } else {
+        const created = await apiFetch<{ id: string }>(`/api/account-meta`, {
+          method: "POST",
+          body: JSON.stringify({
+            linkedBankAccountId: account.id,
+            accountHolderName: accountMetaData.accountHolderName || undefined,
+            bankName: accountMetaData.bankName || undefined,
+            accountType: accountMetaData.accountType || inferAccountType(account.type || ""),
+            internationalAccountNumber: accountMetaData.internationalAccountNumber || undefined,
+            cardLast4: accountMetaData.cardLast4 || undefined,
+            accountNumber: accountMetaData.accountNumber || undefined,
+            sortCode: accountMetaData.sortCode || undefined,
+            documentImageUrls: accountMetaData.documentImageUrls,
+            last3StatementDates: accountMetaData.last3StatementDates || undefined,
+            last3DueDates: accountMetaData.last3DueDates || undefined,
+            label: accountData.name || account.name || "Account",
+          }),
+        });
+        metaId = created?.id || null;
+        setAccountMetaId(metaId);
       }
       if (secureUnlocked && passphrase) {
         const payload = await encryptPayload(passphrase, {
           ...secureData,
           label: secureData.label || accountData.name || bankLabel,
         });
-        await createBankAccountCredential(account.id, payload, secureData.label || accountData.name || bankLabel);
+        if (metaId) {
+          if (sensitiveInfoId) {
+            await apiFetch(`/api/sensitive-info/${sensitiveInfoId}`, {
+              method: "PUT",
+              body: JSON.stringify({ encryptedPayload: payload, accountMetaId: metaId }),
+            });
+          } else {
+            const createdSensitive = await apiFetch<{ id: string }>(`/api/sensitive-info`, {
+              method: "POST",
+              body: JSON.stringify({ encryptedPayload: payload, accountMetaId: metaId }),
+            });
+            setSensitiveInfoId(createdSensitive?.id || null);
+          }
+        }
       }
       setOpen(false);
       window.location.reload();
@@ -215,6 +568,74 @@ export function ViewAccountDialog({
       setSaving(false);
     }
   };
+
+  const handleDocumentUpload = async (files: FileList | null) => {
+    if (!files || !files.length) return;
+    setDocumentError(null);
+    const accepted = Array.from(files).filter((file) => {
+      if (file.size > MAX_DOCUMENT_SIZE_BYTES) return false;
+      if (file.type && !(file.type.startsWith("image/") || file.type === "application/pdf")) return false;
+      return true;
+    });
+    const rejected = Array.from(files).filter((file) => !accepted.includes(file));
+    if (rejected.length) {
+      const message = `Some files were skipped. Max size is ${MAX_DOCUMENT_SIZE_LABEL}.`;
+      setDocumentError(message);
+      setStatusDialog({ title: "Document upload issue", message });
+    }
+    if (!accepted.length) return;
+    try {
+      const metaId = await ensureAccountMeta();
+      if (!metaId) {
+        const message = "Save account details before uploading documents.";
+        setDocumentError(message);
+        setStatusDialog({ title: "Document upload issue", message });
+        return;
+      }
+      const formData = new FormData();
+      accepted.forEach((file) => formData.append("files", file));
+      const result = await apiFetch<{ documentImageUrls?: string[] }>(
+        `/api/account-meta/${metaId}/documents`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+      const nextList = Array.isArray(result?.documentImageUrls) ? result.documentImageUrls : [];
+      setAccountMetaData((prev) => ({
+        ...prev,
+        documentImageUrls: nextList.length ? nextList : prev.documentImageUrls,
+      }));
+    } catch (error) {
+      const message = getErrorMessage(error, "Failed to upload documents.");
+      setDocumentError(message);
+      setStatusDialog({ title: "Document upload failed", message });
+    }
+  };
+
+  const handleRemoveDocument = async (index: number) => {
+    try {
+      const metaId = await ensureAccountMeta();
+      if (!metaId) return;
+      const nextList = accountMetaData.documentImageUrls.filter((_, idx) => idx !== index);
+      setAccountMetaData((prev) => ({ ...prev, documentImageUrls: nextList }));
+      await apiFetch(`/api/account-meta/${metaId}`, {
+        method: "PUT",
+        body: JSON.stringify({ documentImageUrls: nextList }),
+      });
+    } catch (error) {
+      const message = getErrorMessage(error, "Failed to remove document.");
+      setDocumentError(message);
+      setStatusDialog({ title: "Document removal failed", message });
+    }
+  };
+
+  const stripKeyPrefix = (value: string) => value.replace(/^local:|^gcs:/, "");
+  const isInlineData = (value: string) => value.startsWith("data:");
+  const isImageKey = (value: string) =>
+    isInlineData(value) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(stripKeyPrefix(value));
+  const getDocumentUrl = (metaId: string, index: number) =>
+    `${getApiBaseUrl()}/api/account-meta/${metaId}/documents/${index}`;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -242,52 +663,181 @@ export function ViewAccountDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="accountName">Account Name</Label>
-              <Input
-                id="accountName"
-                value={accountData.name}
-                onChange={(e) => setAccountData((prev) => ({ ...prev, name: e.target.value }))}
-              />
-            </div>
+          <div className="grid gap-4">
             <div className="space-y-2">
               <Label htmlFor="bankName">Bank Name</Label>
+              <Input id="bankName" value={accountData.name || bankLabel} readOnly />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="accountHolderName">Account Holder Name</Label>
               <Input
-                id="bankName"
-                value={accountData.bankName || bankLabel}
-                onChange={(e) => setAccountData((prev) => ({ ...prev, bankName: e.target.value }))}
+                id="accountHolderName"
+                value={accountMetaData.accountHolderName}
+                onChange={(e) => setAccountMetaData((prev) => ({ ...prev, accountHolderName: e.target.value }))}
               />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="accountType">Account Type</Label>
+              <Label htmlFor="internationalAccountNumber">
+                {isCardAccount ? "Card last 4 digits" : "IBAN"}
+              </Label>
               <Input
-                id="accountType"
-                value={accountData.type}
-                onChange={(e) => setAccountData((prev) => ({ ...prev, type: e.target.value }))}
+                id="internationalAccountNumber"
+                value={
+                  isCardAccount
+                    ? accountMetaData.cardLast4 || accountData.mask
+                    : accountMetaData.internationalAccountNumber || accountData.mask
+                }
+                readOnly={isReadOnlyMask}
+                onChange={(e) =>
+                  setAccountMetaData((prev) => ({
+                    ...prev,
+                    internationalAccountNumber: isCardAccount ? prev.internationalAccountNumber : e.target.value,
+                    cardLast4: isCardAccount ? e.target.value : prev.cardLast4,
+                  }))
+                }
               />
             </div>
+            {(!isCardAccount ||
+              accountMetaData.accountNumber ||
+              accountMetaData.sortCode ||
+              accountData.accountNumber ||
+              accountData.sortCode) && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="accountNumber">Account Number</Label>
+                  <Input
+                    id="accountNumber"
+                    value={accountMetaData.accountNumber}
+                    readOnly={isReadOnlyAccountNumber}
+                    onChange={(e) => setAccountMetaData((prev) => ({ ...prev, accountNumber: e.target.value }))}
+                    placeholder="Full account number"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sortCode">Sort Code</Label>
+                  <Input
+                    id="sortCode"
+                    value={accountMetaData.sortCode}
+                    readOnly={isReadOnlySortCode}
+                    onChange={(e) =>
+                      setAccountMetaData((prev) => ({
+                        ...prev,
+                        sortCode: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                    placeholder="e.g. 202728"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="currency">Currency</Label>
               <Input
                 id="currency"
                 value={accountData.currency}
+                readOnly={isReadOnlyCurrency}
                 onChange={(e) => setAccountData((prev) => ({ ...prev, currency: e.target.value }))}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="mask">Account Number (last 4)</Label>
+              <Label htmlFor="balance">{balanceLabel}</Label>
               <Input
-                id="mask"
-                value={accountData.mask}
-                onChange={(e) => setAccountData((prev) => ({ ...prev, mask: e.target.value }))}
+                id="balance"
+                type="number"
+                step="0.01"
+                value={formatAmountInput(displayBalance)}
+                readOnly={isReadOnlyBalance}
+                onChange={(e) => setAccountData((prev) => ({ ...prev, balance: Number(e.target.value) }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="availableBalance">{availableLabel}</Label>
+              <Input
+                id="availableBalance"
+                type="number"
+                step="0.01"
+                value={formatAmountInput(displayAvailableBalance)}
+                readOnly={isReadOnlyAvailableBalance}
+                onChange={(e) => setAccountData((prev) => ({ ...prev, availableBalance: Number(e.target.value) }))}
               />
             </div>
           </div>
+          {context !== "bank" && (
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="limit">{limitLabel}</Label>
+                <Input
+                  id="limit"
+                  type="number"
+                  step="0.01"
+                  value={formatAmountInput(displayLimit)}
+                  readOnly={isReadOnlyLimit}
+                  onChange={(e) => setAccountData((prev) => ({ ...prev, limit: Number(e.target.value) }))}
+                />
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label>Document Images</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              {accountMetaData.documentImageUrls.map((url, index) => (
+                <div
+                  key={`${url}-${index}`}
+                  role="button"
+                  tabIndex={0}
+                  className="group relative h-12 w-12 overflow-hidden rounded-md border"
+                  onClick={() => setDocumentPreviewIndex(index)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setDocumentPreviewIndex(index);
+                    }
+                  }}
+                >
+                  {isImageKey(url) ? (
+                    <img
+                      src={isInlineData(url) ? url : getDocumentUrl(accountMetaId, index)}
+                      alt="Document"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-slate-50 text-[10px] font-semibold text-slate-500">
+                      FILE
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-xs opacity-0 shadow-sm transition group-hover:opacity-100"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleRemoveDocument(index);
+                    }}
+                    aria-label="Remove image"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              <label className="flex h-12 w-12 cursor-pointer items-center justify-center rounded-md border border-dashed text-muted-foreground hover:text-foreground">
+                <Plus className="h-4 w-4" />
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => void handleDocumentUpload(e.target.files)}
+                />
+              </label>
+            </div>
+          </div>
 
-          {isCardType && (
+          {isCardAccount && (
             <div className="rounded-lg border p-4 space-y-3">
               <div className="text-sm font-semibold">Statement & Payable</div>
               <div className="grid grid-cols-2 gap-4">
@@ -296,8 +846,8 @@ export function ViewAccountDialog({
                   <Input
                     id="statementBalance"
                     type="number"
-                    value={accountData.statementBalance}
-                    onChange={(e) => setAccountData((prev) => ({ ...prev, statementBalance: Number(e.target.value) }))}
+                    value={formatAmountInput(accountData.statementBalance)}
+                    readOnly
                   />
                 </div>
                 <div className="space-y-2">
@@ -305,8 +855,8 @@ export function ViewAccountDialog({
                   <Input
                     id="statementPaidAmount"
                     type="number"
-                    value={accountData.statementPaidAmount}
-                    onChange={(e) => setAccountData((prev) => ({ ...prev, statementPaidAmount: Number(e.target.value) }))}
+                    value={formatAmountInput(accountData.statementPaidAmount)}
+                    readOnly
                   />
                 </div>
                 <div className="space-y-2">
@@ -314,8 +864,18 @@ export function ViewAccountDialog({
                   <Input
                     id="statementDate"
                     type="date"
-                    value={accountData.statementDate}
-                    onChange={(e) => setAccountData((prev) => ({ ...prev, statementDate: e.target.value }))}
+                    value={statementDateInput}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setStatementDateInput(next);
+                      setAccountData((prev) => ({ ...prev, statementDate: next }));
+                      setAccountMetaData((prev) => ({
+                        ...prev,
+                        last3StatementDates: JSON.stringify(
+                          pushDateHistory(parseDateList(prev.last3StatementDates), next)
+                        ),
+                      }));
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -323,8 +883,18 @@ export function ViewAccountDialog({
                   <Input
                     id="statementDueDate"
                     type="date"
-                    value={accountData.statementDueDate}
-                    onChange={(e) => setAccountData((prev) => ({ ...prev, statementDueDate: e.target.value }))}
+                    value={statementDueDateInput}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setStatementDueDateInput(next);
+                      setAccountData((prev) => ({ ...prev, statementDueDate: next }));
+                      setAccountMetaData((prev) => ({
+                        ...prev,
+                        last3DueDates: JSON.stringify(
+                          pushDateHistory(parseDateList(prev.last3DueDates), next)
+                        ),
+                      }));
+                    }}
                   />
                 </div>
               </div>
@@ -345,60 +915,6 @@ export function ViewAccountDialog({
               </p>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="accountNumber">Account Number</Label>
-              <Input
-                id="accountNumber"
-                value={accountData.accountNumber}
-                onChange={(e) => setAccountData((prev) => ({ ...prev, accountNumber: e.target.value }))}
-                placeholder="Full account number"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="sortCode">Sort Code</Label>
-              <Input
-                id="sortCode"
-                value={accountData.sortCode}
-                onChange={(e) =>
-                  setAccountData((prev) => ({
-                    ...prev,
-                    sortCode: e.target.value.replace(/[^0-9]/g, ""),
-                  }))
-                }
-                placeholder="e.g. 202728"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="balance">Current Balance</Label>
-              <Input
-                id="balance"
-                type="number"
-                value={accountData.balance}
-                onChange={(e) => setAccountData((prev) => ({ ...prev, balance: Number(e.target.value) }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="availableBalance">Available Balance</Label>
-              <Input
-                id="availableBalance"
-                type="number"
-                value={accountData.availableBalance}
-                onChange={(e) => setAccountData((prev) => ({ ...prev, availableBalance: Number(e.target.value) }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="limit">Limit</Label>
-              <Input
-                id="limit"
-                type="number"
-                value={accountData.limit}
-                onChange={(e) => setAccountData((prev) => ({ ...prev, limit: Number(e.target.value) }))}
-              />
-            </div>
-          </div>
 
           <div className="rounded-lg border p-4 space-y-3">
             <div className="text-sm font-semibold">Sensitive credentials</div>
@@ -418,26 +934,42 @@ export function ViewAccountDialog({
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="passphrase">Passphrase</Label>
-                <Input
-                  id="passphrase"
-                  type="password"
-                  value={passphrase}
-                  onChange={(e) => setPassphrase(e.target.value)}
-                  placeholder="Enter passphrase"
-                />
+                <div className="relative">
+                  <Input
+                    id="passphrase"
+                    type={passphraseVisible ? "text" : "password"}
+                    value={passphrase}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    placeholder="Enter passphrase"
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setPassphraseVisible((prev) => !prev)}
+                    aria-label={passphraseVisible ? "Hide passphrase" : "Show passphrase"}
+                  >
+                    {passphraseVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
               <div className="flex items-end">
-                <Button type="button" variant="outline" onClick={handleUnlock} disabled={!passphraseReady}>
-                  Unlock
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={secureUnlocked ? lockSensitive : handleUnlock}
+                  disabled={!passphraseReady}
+                >
+                  {secureUnlocked ? "Lock" : "Unlock"}
                 </Button>
               </div>
             </div>
-        {secureError && (
-          <Alert variant="destructive">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{secureError}</AlertDescription>
-          </Alert>
-        )}
+            {secureError && (
+              <Alert variant="destructive">
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{secureError}</AlertDescription>
+              </Alert>
+            )}
             {secureUnlocked && (
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -483,13 +1015,6 @@ export function ViewAccountDialog({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Auth Details</Label>
-                  <Input
-                    value={secureData.authDetails || ""}
-                    onChange={(e) => setSecureData((prev) => ({ ...prev, authDetails: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
                   <Label>Statement Password</Label>
                   <Input
                     value={secureData.statementPassword || ""}
@@ -510,29 +1035,113 @@ export function ViewAccountDialog({
               <DialogDescription>Copy the details below to share.</DialogDescription>
             </DialogHeader>
             <div className="space-y-2 text-sm whitespace-pre-line bg-slate-50 border rounded-md p-3">
-              {[
-                `Name: ${accountData.name || "—"}`,
-                `Bank: ${accountData.bankName || bankLabel || "—"}`,
-                `Sort Code: ${accountData.sortCode || "—"}`,
-                `Account Number: ${accountData.accountNumber || "—"}`,
-                `Currency: ${accountData.currency || "—"}`,
-              ].join("\n")}
+              {isCardAccount
+                ? secureUnlocked
+                  ? [
+                      `Name on Card: ${secureData.nameOnCard || parseHolderName(accountMetaData.accountHolderName) || accountData.name || "—"}`,
+                      `Card Number: ${secureData.fullCardNumber || "—"}`,
+                      `Expiry Date: ${secureData.expiryDate || "—"}`,
+                      `CVV: ${secureData.cvv || "—"}`,
+                    ].join("\n")
+                  : "Unlock sensitive fields to share card details."
+                : [
+                    `Name: ${parseHolderName(accountMetaData.accountHolderName) || accountData.name || "—"}`,
+                    `Bank: ${accountMetaData.bankName || bankLabel || "—"}`,
+                    `IBAN: ${accountMetaData.internationalAccountNumber || accountData.mask || "—"}`,
+                    `Sort Code: ${accountMetaData.sortCode || "—"}`,
+                    `Account Number: ${accountMetaData.accountNumber || "—"}`,
+                    `Currency: ${accountData.currency || "—"}`,
+                  ].join("\n")}
             </div>
+            {isCardAccount && !secureUnlocked && (
+              <div className="space-y-3 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+                <div>Unlock sensitive fields to share card details.</div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Input
+                    type={passphraseVisible ? "text" : "password"}
+                    value={passphrase}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    placeholder="Enter passphrase"
+                  />
+                  <Button type="button" variant="outline" onClick={handleUnlock} disabled={!passphraseReady}>
+                    Unlock
+                  </Button>
+                </div>
+              </div>
+            )}
             <DialogFooter>
               <Button
                 variant="outline"
                 onClick={async () => {
-                  const text = [
-                    `Name: ${accountData.name || "—"}`,
-                    `Bank: ${accountData.bankName || bankLabel || "—"}`,
-                    `Sort Code: ${accountData.sortCode || "—"}`,
-                    `Account Number: ${accountData.accountNumber || "—"}`,
-                    `Currency: ${accountData.currency || "—"}`,
-                  ].join("\n");
+                  const text = isCardAccount
+                    ? [
+                        `Name on Card: ${secureData.nameOnCard || parseHolderName(accountMetaData.accountHolderName) || accountData.name || "—"}`,
+                        `Card Number: ${secureData.fullCardNumber || "—"}`,
+                        `Expiry Date: ${secureData.expiryDate || "—"}`,
+                        `CVV: ${secureData.cvv || "—"}`,
+                      ].join("\n")
+                    : [
+                        `Name: ${parseHolderName(accountMetaData.accountHolderName) || accountData.name || "—"}`,
+                        `Bank: ${accountMetaData.bankName || bankLabel || "—"}`,
+                        `IBAN: ${accountMetaData.internationalAccountNumber || accountData.mask || "—"}`,
+                        `Sort Code: ${accountMetaData.sortCode || "—"}`,
+                        `Account Number: ${accountMetaData.accountNumber || "—"}`,
+                        `Currency: ${accountData.currency || "—"}`,
+                      ].join("\n");
                   await navigator.clipboard.writeText(text);
+                  setCopyNoticeOpen(true);
+                  setTimeout(() => setCopyNoticeOpen(false), 2000);
                 }}
+                disabled={isCardAccount && !secureUnlocked}
               >
                 Copy details
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={documentPreviewIndex !== null} onOpenChange={() => setDocumentPreviewIndex(null)}>
+          <DialogContent className="sm:max-w-[640px]">
+            <DialogHeader>
+              <DialogTitle>Document preview</DialogTitle>
+            </DialogHeader>
+            {accountMetaId && documentPreviewIndex !== null && (
+              isImageKey(accountMetaData.documentImageUrls[documentPreviewIndex]) ? (
+                <img
+                  src={
+                    isInlineData(accountMetaData.documentImageUrls[documentPreviewIndex])
+                      ? accountMetaData.documentImageUrls[documentPreviewIndex]
+                      : getDocumentUrl(accountMetaId, documentPreviewIndex)
+                  }
+                  alt="Document preview"
+                  className="h-auto w-full rounded-md border object-contain"
+                />
+              ) : (
+                <iframe
+                  title="Document preview"
+                  src={getDocumentUrl(accountMetaId, documentPreviewIndex)}
+                  className="h-[70vh] w-full rounded-md border"
+                />
+              )
+            )}
+          </DialogContent>
+        </Dialog>
+        <Dialog open={copyNoticeOpen} onOpenChange={setCopyNoticeOpen}>
+          <DialogContent className="sm:max-w-[360px]">
+            <DialogHeader>
+              <DialogTitle>Copied</DialogTitle>
+              <DialogDescription>Account details copied to clipboard.</DialogDescription>
+            </DialogHeader>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={Boolean(statusDialog)} onOpenChange={(open) => (!open ? setStatusDialog(null) : null)}>
+          <DialogContent className="sm:max-w-[420px]">
+            <DialogHeader>
+              <DialogTitle>{statusDialog?.title}</DialogTitle>
+              <DialogDescription>{statusDialog?.message}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setStatusDialog(null)}>
+                Close
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -541,8 +1150,11 @@ export function ViewAccountDialog({
           <Button variant="outline" onClick={() => setShareOpen(true)}>
             Share details
           </Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : "Save Changes"}
+          <Button
+            onClick={isDirty ? handleSave : () => setOpen(false)}
+            disabled={saving}
+          >
+            {saving ? "Saving..." : isDirty ? "Save Changes" : "Close"}
           </Button>
         </DialogFooter>
       </DialogContent>

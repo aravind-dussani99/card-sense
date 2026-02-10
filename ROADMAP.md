@@ -44,6 +44,11 @@ This roadmap captures the next set of planned capabilities so we can prioritize 
 - [ ] Reconciliation workflows
   - Better review queues and approvals
   - De-duplication and merge flows
+- [ ] Security hardening (V2)
+  - Strong KDF params and passphrase policy enforcement
+  - Session-only key storage (no persistent vault key in browser)
+  - Rate-limit sensitive unlock attempts and add audit logs
+  - CSP/XSS hardening pass and dependency review
 
 ## Phase 3 — Rewards and Offers
 - [ ] Rewards page (first usable version)

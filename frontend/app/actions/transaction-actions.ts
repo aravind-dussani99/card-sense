@@ -76,6 +76,41 @@ export async function getBankTransactions(limit = 100) {
     }
 }
 
+export type DirectDebitItem = {
+    id: string;
+    accountId: string;
+    name: string;
+    reference?: string | null;
+    amount: number;
+    currency?: string | null;
+    description?: string | null;
+    date: string;
+};
+
+export type DirectDebitUpcoming = {
+    name: string;
+    reference?: string | null;
+    expectedDate: string;
+    expectedAmount: number;
+    lastSeen: string;
+    occurrences: number;
+    accountIds: string[];
+};
+
+export type DirectDebitSummary = {
+    lastMonth: DirectDebitItem[];
+    upcoming: DirectDebitUpcoming[];
+};
+
+export async function getDirectDebits() {
+    try {
+        return await apiFetch<DirectDebitSummary>(`/api/transactions/direct-debits`);
+    } catch (error) {
+        console.error("Failed to fetch direct debits:", error);
+        return { lastMonth: [], upcoming: [] };
+    }
+}
+
 export async function getTransaction(id: string) {
     try {
         return await apiFetch<Record<string, unknown>>(`/api/transactions/${id}`);

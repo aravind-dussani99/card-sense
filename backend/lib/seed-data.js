@@ -3,8 +3,6 @@ import { prisma } from "./prisma.js";
 export async function seedDefaultData() {
   try {
     const existingCategories = await prisma.category.findMany({ where: { userId: null } });
-    const existingCardTypes = await prisma.cardType.findMany();
-    const existingBanks = await prisma.bank.findMany();
 
     const defaultCategories = [
       { name: "Food", color: "#FF6B6B", icon: "food" },
@@ -106,46 +104,7 @@ export async function seedDefaultData() {
       }
     }
 
-    if (existingCardTypes.length === 0) {
-      const cardTypes = [
-        { name: "Visa", color: "#1A1F71", icon: "visa" },
-        { name: "Mastercard", color: "#EB001B", icon: "mastercard" },
-        { name: "American Express", color: "#006FCF", icon: "amex" },
-        { name: "Discover", color: "#FF6000", icon: "discover" },
-      ];
-
-      for (const cardType of cardTypes) {
-        await prisma.cardType.create({
-          data: {
-            name: cardType.name,
-            color: cardType.color,
-            icon: cardType.icon,
-          },
-        });
-      }
-    }
-
-    if (existingBanks.length === 0) {
-      const banks = [
-        { name: "SBI", color: "#004C93", icon: "bank" },
-        { name: "HDFC", color: "#004C93", icon: "bank" },
-        { name: "Monzo", color: "#14233C", icon: "bank" },
-        { name: "Lloyds", color: "#006A4E", icon: "bank" },
-        { name: "Halifax", color: "#00AEEF", icon: "bank" },
-      ];
-
-      for (const bank of banks) {
-        await prisma.bank.create({
-          data: {
-            name: bank.name,
-            color: bank.color,
-            icon: bank.icon,
-          },
-        });
-      }
-    }
-
-    if (existingCategories.length > 0 && existingCardTypes.length > 0 && existingBanks.length > 0) {
+    if (existingCategories.length > 0) {
       console.log("Default data already exists, ensured required categories/sub-categories");
       return;
     }
