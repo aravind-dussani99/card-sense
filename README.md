@@ -48,7 +48,7 @@ PORT=8081
 ```
 
 3) Use the Postgres Prisma schema locally:
-- In `backend/prisma/schema.prisma`, set:
+- In `backend/prisma/schema.postgres.prisma`, set:
 
 ```prisma
 datasource db {
@@ -57,13 +57,12 @@ datasource db {
 }
 ```
 
-4) Reset migrations (required when switching from SQLite to Postgres):
+4) Initialize migrations:
 
 ```bash
-rm -rf backend/prisma/migrations
 cd backend
-npx prisma migrate dev --name init
-npx prisma generate
+npx prisma migrate dev --name init --schema prisma/schema.postgres.prisma
+npx prisma generate --schema prisma/schema.postgres.prisma
 npm run seed
 npm run dev
 ```

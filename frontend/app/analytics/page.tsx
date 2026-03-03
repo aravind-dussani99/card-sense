@@ -1,5 +1,6 @@
 import { Metadata } from "next"
 import { MainNav } from "@/components/main-nav"
+import { AuthMenu } from "@/components/auth-menu"
 import { getSpendingByCategory, getMonthlySpending, getSpendingByCard, getSpendingByMerchant } from "@/app/actions/analytics-actions"
 import { AnalyticsCharts } from "@/components/analytics-charts"
 
@@ -7,6 +8,8 @@ export const metadata: Metadata = {
     title: "Analytics - CardSense",
     description: "Analyze your spending habits.",
 }
+
+export const dynamic = "force-dynamic";
 
 export default async function AnalyticsPage() {
     const categoryData = await getSpendingByCategory();
@@ -20,6 +23,9 @@ export default async function AnalyticsPage() {
                 <div className="flex h-16 items-center px-4">
                     <h1 className="text-xl font-bold mr-8 bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">CardSense</h1>
                     <MainNav className="mx-6" />
+                    <div className="ml-auto flex items-center gap-3">
+                        <AuthMenu />
+                    </div>
                 </div>
             </div>
             <div className="flex-1 space-y-4 p-8 pt-6">

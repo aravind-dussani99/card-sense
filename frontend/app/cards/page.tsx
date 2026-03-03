@@ -1,8 +1,9 @@
 import { Metadata } from "next"
 import { MainNav } from "@/components/main-nav"
-import { getCards } from "@/app/actions/card-actions"
+import { AuthMenu } from "@/components/auth-menu"
 import { getBankAccounts } from "@/app/actions/bank-actions"
-import { BankAccount, Card } from "@/lib/types"
+import { getAccountMetas } from "@/app/actions/account-meta-actions"
+import { BankAccount, AccountMeta } from "@/lib/types"
 import { AccountsHubContent } from "@/components/accounts-hub-content"
 
 export const metadata: Metadata = {
@@ -10,9 +11,11 @@ export const metadata: Metadata = {
     description: "Manage your bank accounts, overdrafts, and credit cards.",
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function CardsPage() {
-    const cards: Card[] = await getCards();
     const bankAccounts: BankAccount[] = await getBankAccounts();
+    const accountMetas: AccountMeta[] = await getAccountMetas();
 
     return (
         <div className="flex flex-col min-h-screen">
@@ -20,9 +23,15 @@ export default async function CardsPage() {
                 <div className="flex h-16 items-center px-4">
                     <h1 className="text-xl font-bold mr-8 bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">CardSense</h1>
                     <MainNav className="mx-6" />
+                    <div className="ml-auto flex items-center gap-3">
+                        <AuthMenu />
+                    </div>
                 </div>
             </div>
-            <AccountsHubContent cards={cards} bankAccounts={bankAccounts} />
+            <AccountsHubContent
+                bankAccounts={bankAccounts}
+                accountMetas={accountMetas}
+            />
         </div>
     )
 }

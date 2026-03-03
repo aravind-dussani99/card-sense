@@ -9,13 +9,6 @@ export type ApiResponse<T> = {
   };
 };
 
-export type Bank = {
-  id: string;
-  name: string;
-  icon?: string | null;
-  color?: string | null;
-};
-
 export type BankConnection = {
   id: string;
   provider: string;
@@ -31,29 +24,35 @@ export type BankAccount = {
   name?: string | null;
   type?: string | null;
   mask?: string | null;
+  accountNumber?: string | null;
+  sortCode?: string | null;
   currency?: string | null;
   balance?: number | null;
   availableBalance?: number | null;
   limit?: number | null;
+  statementBalance?: number | null;
+  statementDate?: string | null;
+  statementDueDate?: string | null;
+  statementPaidAmount?: number | null;
+  statementPaidComputed?: number | null;
+  statementPayable?: number | null;
+  statementDueInDays?: number | null;
   connectionId?: string | null;
   providerAccountId?: string | null;
   status?: string | null;
   tags?: string | null;
+  connection?: { institutionId?: string | null; provider?: string | null } | null;
 };
 
-export type CardType = {
+export type HeadAccount = {
   id: string;
   name: string;
-  icon?: string | null;
-  color?: string | null;
 };
 
 export type Card = {
   id: string;
   name: string;
   last4?: string | null;
-  cardTypeId?: string | null;
-  bankId?: string | null;
   bank?: string | null;
   balance?: number | null;
   limit?: number | null;
@@ -110,6 +109,52 @@ export type BankTransaction = {
   providerTransactionId?: string | null;
   transactionType?: string | null;
   meta?: BankTransactionMeta | null;
+};
+
+export type AccountType =
+  | "BANK_ACCOUNT"
+  | "OVERDRAFT"
+  | "CREDIT_CARD"
+  | "DEBIT_CARD"
+  | "CASH_ACCOUNT"
+  | "CASH_CARD"
+  | "OTHER";
+
+export type AccountMeta = {
+  id: string;
+  linkedBankAccountId?: string | null;
+  parentAccountId?: string | null;
+  accountType: AccountType;
+  label: string;
+  accountHolderName?: string | null;
+  bankName?: string | null;
+  currency?: string | null;
+  internationalAccountNumber?: string | null;
+  accountNumber?: string | null;
+  sortCode?: string | null;
+  balance?: number | null;
+  availableBalance?: number | null;
+  limit?: number | null;
+  cardNetwork?: string | null;
+  cardLast4?: string | null;
+  cardImageUrl?: string | null;
+  documentImageUrls?: string[] | null;
+  sensitiveDocumentImageUrls?: string[] | null;
+  statementDay?: number | null;
+  dueDay?: number | null;
+  last3StatementDates?: string | null;
+  last3DueDates?: string | null;
+  status?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type SensitiveInfo = {
+  id: string;
+  accountMetaId: string;
+  encryptedPayload: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type AnalyticsValuePoint = {

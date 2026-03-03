@@ -123,6 +123,9 @@ export function passphraseMarkerExists() {
 export async function setPassphraseMarker(passphrase: string) {
   const marker = await encryptPayload(passphrase, { ok: true, createdAt: new Date().toISOString() });
   localStorage.setItem(PASSPHRASE_CHECK_KEY, marker);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("cardsense-passphrase"));
+  }
 }
 
 export async function verifyPassphrase(passphrase: string) {
@@ -138,6 +141,9 @@ export async function verifyPassphrase(passphrase: string) {
 
 export function clearPassphraseMarker() {
   localStorage.removeItem(PASSPHRASE_CHECK_KEY);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("cardsense-passphrase"));
+  }
 }
 
 export function vaultExists() {

@@ -1,29 +1,33 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { CheckCircle2, RefreshCw, Link2, AlertCircle } from "lucide-react";
 import { getApiBaseUrl } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 
 export function BankConnect() {
-    const [userId, setUserId] = useState("user-001");
+    const [authToken, setAuthToken] = useState("");
     const [syncing, setSyncing] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const token = localStorage.getItem("cardsense_token") || "";
+        setAuthToken(token);
+    }, []);
+
     const authUrl = useMemo(() => {
         const clientId = process.env.NEXT_PUBLIC_TRUELAYER_CLIENT_ID || "";
         const redirect = process.env.NEXT_PUBLIC_TRUELAYER_REDIRECT_URI || `${getApiBaseUrl()}/api/bank/callback`;
-        if (!clientId) return "";
+        if (!clientId || !authToken) return "";
         const scope = encodeURIComponent("info accounts balance cards transactions direct_debits standing_orders offline_access");
         const providers = encodeURIComponent("uk-cs-mock uk-ob-all uk-oauth-all");
-        return `${process.env.NEXT_PUBLIC_TRUELAYER_AUTH_BASE || "https://auth.truelayer.com"}/?response_type=code&client_id=${clientId}&scope=${scope}&redirect_uri=${encodeURIComponent(redirect)}&providers=${providers}&state=${encodeURIComponent(userId)}`;
-    }, [userId]);
+        return `${process.env.NEXT_PUBLIC_TRUELAYER_AUTH_BASE || "https://auth.truelayer.com"}/?response_type=code&client_id=${clientId}&scope=${scope}&redirect_uri=${encodeURIComponent(redirect)}&providers=${providers}&state=${encodeURIComponent(authToken)}`;
+    }, [authToken]);
 
     const handleSync = async () => {
         try {
@@ -33,7 +37,7 @@ export function BankConnect() {
             const res = await fetch(`${getApiBaseUrl()}/api/bank/sync`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId }),
+                body: JSON.stringify({}),
             });
             const data = await res.json();
             if (!res.ok || !data.success) {
@@ -59,15 +63,8 @@ export function BankConnect() {
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div className="space-y-2">
-                    <Label htmlFor="userId">User ID (state)</Label>
-                    <Input
-                        id="userId"
-                        value={userId}
-                        onChange={(e) => setUserId(e.target.value)}
-                        placeholder="user-id"
-                    />
-                    <p className="text-xs text-muted-foreground">Used in state to associate the connection.</p>
+                <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                    The auth dialog uses your signed-in session to link the bank connection.
                 </div>
         <div className="flex flex-wrap gap-3">
                     <Button
@@ -87,7 +84,11 @@ export function BankConnect() {
                     <Alert variant="destructive">
                         <AlertCircle className="h-4 w-4" />
                         <AlertTitle>Missing client ID</AlertTitle>
-                        <AlertDescription>Set NEXT_PUBLIC_TRUELAYER_CLIENT_ID in .env for the Auth Dialog link.</AlertDescription>
+                        <AlertDescription>
+                            {process.env.NEXT_PUBLIC_TRUELAYER_CLIENT_ID
+                                ? "Sign in again so we can attach the bank connection to your session."
+                                : "Set NEXT_PUBLIC_TRUELAYER_CLIENT_ID in .env for the Auth Dialog link."}
+                        </AlertDescription>
                     </Alert>
                 )}
                 {message && (

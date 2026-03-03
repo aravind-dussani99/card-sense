@@ -14,8 +14,25 @@ export async function apiFetch<T>(path: string, options: FetchOptions = {}) {
   const baseUrl = getApiBaseUrl();
   const url = path.startsWith("http") ? path : `${baseUrl}${path}`;
   const headers = new Headers(options.headers || {});
-  if (!headers.has("Content-Type") && options.body) {
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (!headers.has("Content-Type") && options.body && !isFormData) {
     headers.set("Content-Type", "application/json");
+  }
+  if (!headers.has("Authorization")) {
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("cardsense_token") || "";
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+    } else {
+      try {
+        const { cookies } = await import("next/headers");
+        const cookieStore = await cookies();
+        const token = cookieStore.get("cardsense_token")?.value;
+        if (token) headers.set("Authorization", `Bearer ${token}`);
+      } catch {
+        // ignore when headers API isn't available
+      }
+    }
   }
 
   const response = await fetch(url, {

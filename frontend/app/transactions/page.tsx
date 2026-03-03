@@ -1,9 +1,11 @@
 import { Metadata } from "next";
 import { MainNav } from "@/components/main-nav";
+import { AuthMenu } from "@/components/auth-menu";
 import { TransactionsList } from "@/components/transactions-list";
 import { getCards } from "@/app/actions/card-actions";
 import { getCategories } from "@/app/actions/category-actions";
 import { getBankAccounts } from "@/app/actions/bank-actions";
+import { getHeadAccounts } from "@/app/actions/head-account-actions";
 import { TransactionsHeaderActions } from "@/components/transactions-header-actions";
 
 export const metadata: Metadata = {
@@ -11,11 +13,14 @@ export const metadata: Metadata = {
     description: "View and manage all your transactions.",
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function TransactionsPage() {
-    const [cards, categories, accounts] = await Promise.all([
+    const [cards, categories, accounts, headAccounts] = await Promise.all([
         getCards(),
         getCategories(),
         getBankAccounts(),
+        getHeadAccounts(),
     ]);
 
     return (
@@ -24,6 +29,9 @@ export default async function TransactionsPage() {
                 <div className="flex h-16 items-center px-4">
                     <h1 className="text-xl font-bold mr-8 bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">CardSense</h1>
                     <MainNav className="mx-6" />
+                    <div className="ml-auto flex items-center gap-3">
+                        <AuthMenu />
+                    </div>
                 </div>
             </div>
             <div className="mx-auto w-full max-w-7xl px-6 py-10 flex-1">
@@ -42,6 +50,7 @@ export default async function TransactionsPage() {
                         cards={cards}
                         categories={categories}
                         accounts={accounts}
+                        headAccounts={headAccounts}
                     />
                 </div>
             </div>

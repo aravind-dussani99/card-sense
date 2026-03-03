@@ -1,6 +1,7 @@
 "use client";
 
 import { CardCountdown } from "@/components/card-countdown";
+import { formatAmount } from "@/lib/utils";
 
 interface CardDisplayProps {
     card: {
@@ -101,12 +102,12 @@ export function CardDisplay({ card }: CardDisplayProps) {
                 <div className="grid grid-cols-2 gap-4">
                     <div>
                         <div className="text-xs text-muted-foreground">Total Credit Limit</div>
-                        <div className="text-sm font-semibold">${card.limit.toLocaleString()}</div>
+                        <div className="text-sm font-semibold">{formatAmount(card.limit, { currency: "$" })}</div>
                     </div>
                     <div>
                         <div className="text-xs text-muted-foreground">Available Credit Limit</div>
                         <div className="text-sm font-semibold text-green-600">
-                            ${availableCredit.toLocaleString()}
+                            {formatAmount(availableCredit, { currency: "$" })}
                         </div>
                     </div>
                 </div>
@@ -129,7 +130,7 @@ export function CardDisplay({ card }: CardDisplayProps) {
                     </div>
                     <div className="flex justify-between text-[10px] text-muted-foreground">
                         <span>0</span>
-                        <span>${card.limit.toLocaleString()}</span>
+                        <span>{formatAmount(card.limit, { currency: "$" })}</span>
                     </div>
                 </div>
             </div>

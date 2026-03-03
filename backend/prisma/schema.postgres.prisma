@@ -7,64 +7,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Card {
-  id                       String                      @id @default(uuid())
-  name                     String
-  nameOnCard               String? // Name printed on the card
-  bank                     String
-  bankId                   String?
-  bankRef                  Bank?                       @relation(fields: [bankId], references: [id], onDelete: SetNull)
-  cardTypeId               String? // Network (Visa, Mastercard, Amex)
-  cardType                 CardType?                   @relation(fields: [cardTypeId], references: [id], onDelete: SetNull)
-  cardCategory             String? // Card type/category (Rupay, PhonePe, IndianOil, Rewards, Amazon, etc.)
-  productCode              String?
-  planName                 String?
-  benefitsJson             String?
-  tags                     String?
-  last4                    String
-  fullCardNumber           String? // Full card number (encrypted/hidden)
-  expiryDate               String? // Format: "MM/YY" or "10/29"
-  cvv                      String? // CVV (encrypted/hidden)
-  statementPassword        String? // Password for encrypted statement PDFs
-  limit                    Float
-  balance                  Float                       @default(0)
-  cutoffDate               Int
-  dueDate                  Int
-  last3DueDates            String? // JSON array of last 3 due dates for prediction
-  color                    String                      @default("bg-gray-800")
-  createdAt                DateTime                    @default(now())
-  updatedAt                DateTime                    @updatedAt
-  transactions             Transaction[]
-  draftTransactions        DraftTransaction[]
-  offers                   Offer[]
-  credential               CardCredential?
-}
-
-model Transaction {
-  id              String   @id @default(uuid())
-  cardId          String?
-  card            Card?    @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  providerTxId    String?  @unique
-  merchant        String
-  amount          Float
-  category        String
-  subCategory     String?
-  description     String?
-  date            DateTime @default(now())
-  transactionType String   @default("expense") // "expense", "loan_given", "loan_received"
-  loanTo          String? // Person/entity who received the loan (for loan_given)
-  loanFrom        String? // Person/entity who gave the loan (for loan_received)
-  createdAt       DateTime @default(now())
-}
-
 model Category {
   id                        String                      @id @default(uuid())
-  name                      String                      @unique
+  userId                    String?
+  user                      User?                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                      String
   icon                      String?
   color                     String?
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
   subCategories             SubCategory[]
+
+  @@unique([userId, name])
 }
 
 model SubCategory {
@@ -76,113 +30,82 @@ model SubCategory {
   updatedAt                 DateTime                    @updatedAt
 }
 
-model CardType {
+model HeadAccount {
   id        String   @id @default(uuid())
-  name      String   @unique // This IS the network (e.g., "Mastercard", "Visa", "American Express")
-  icon      String?
-  color     String?
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  cards     Card[]
+
+  @@unique([userId, name])
 }
 
-model Bank {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  icon      String?
-  color     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  cards     Card[]
+
+enum UserRole {
+  USER
+  ADMIN
 }
 
-model FromEntity {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  type      String? // "vendor", "company", "person", etc.
-  icon      String?
-  color     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum AccountType {
+  BANK_ACCOUNT
+  OVERDRAFT
+  CREDIT_CARD
+  DEBIT_CARD
+  CASH_ACCOUNT
+  CASH_CARD
+  OTHER
 }
 
-model ToEntity {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  type      String? // "vendor", "person", "debt", etc.
-  icon      String?
-  color     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model User {
+  id               String                     @id @default(uuid())
+  email            String                     @unique
+  passwordHash     String
+  name             String?
+  role             UserRole                   @default(USER)
+  emailVerifiedAt  DateTime?
+  lastLoginAt      DateTime?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  emailTokens      EmailVerificationToken[]
+  passwordTokens   PasswordResetToken[]
+  categories       Category[]
+  bankConnections  BankConnection[]
+  bankAccounts     BankAccount[]
+  bankTransactions BankTransaction[]
+  bankTransactionMeta BankTransactionMeta[]
+  merchantRules    MerchantCategoryRule[]
+  headAccounts     HeadAccount[]
+  accountMetas     AccountMeta[]
+  sensitiveInfos   SensitiveInfo[]
 }
 
-model DraftTransaction {
-  id                String   @id @default(uuid())
-  emailId           String?  @unique // Email message ID to prevent duplicates (nullable for bank imports)
-  cardId            String?
-  card              Card?    @relation(fields: [cardId], references: [id], onDelete: SetNull)
-  bankAccountId     String? // Link to BankAccount if from Open Banking
-  providerTxId      String?  @unique // Provider transaction id to prevent duplicates
-  source            String? // "email", "statement", "open_banking"
-  merchant          String
-  amount            Float
-  category          String?
-  subCategory       String?
-  description       String?
-  date              DateTime
-  transactionType   String   @default("expense")
-  status            String   @default("pending") // "pending", "approved", "rejected", "modified"
-  originalData      String? // JSON of original extracted data
-  modifiedData      String? // JSON of user-modified data
-  emailSubject      String?
-  emailBody         String? // Extracted email content
-  needsCardCreation Boolean  @default(false) // True if card/account needs to be created
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+model EmailVerificationToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
 }
 
-model Offer {
-  id              String   @id @default(uuid())
-  emailId         String   @unique // Email message ID to prevent duplicates
-  title           String
-  description     String
-  cardId          String?
-  card            Card?    @relation(fields: [cardId], references: [id], onDelete: SetNull)
-  discountAmount  Float? // Amount saved if offer is used
-  discountPercent Float? // Percentage discount
-  minSpend        Float? // Minimum spend required
-  maxDiscount     Float? // Maximum discount cap
-  startDate       DateTime
-  endDate         DateTime
-  terms           String? // Terms and conditions
-  category        String? // Offer category (cashback, discount, etc.)
-  status          String   @default("active") // "active", "archived", "used"
-  isRead          Boolean  @default(false) // Whether the offer has been read
-  senderEmail     String? // Sender email address for filtering and tracking
-  emailSubject    String?
-  emailBody       String? // Extracted email content
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+model PasswordResetToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
 }
 
-model ProcessedEmail {
-  id               String    @id @default(uuid())
-  emailId          String    @unique // Email message ID
-  emailSubject     String?
-  originalDate     DateTime? // Original email date (when email was sent/received)
-  processedAt      DateTime  @default(now())
-  transactionCount Int       @default(0) // Number of transactions extracted
-  offerCount       Int       @default(0) // Number of offers extracted
-  status           String    @default("processed") // "processed", "failed", "partial"
-  errorMessage     String?
-  emailBody        String? // Store email body for viewing in dialog
-  createdAt        DateTime  @default(now())
-}
 
 // Open Banking (TrueLayer or other providers)
 model BankConnection {
   id                String        @id @default(uuid())
-  userId            String // TODO: link to user model when available
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider          String // e.g., "truelayer"
   providerAccountId String // Provider connection id
   accessToken       String // Encrypted/tokenized at app layer
@@ -196,9 +119,11 @@ model BankConnection {
 
 model BankAccount {
   id                       String                      @id @default(uuid())
+  userId                   String
+  user                     User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
   connectionId             String
   connection               BankConnection              @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  providerAccountId        String                      @unique // account id from provider
+  providerAccountId        String // account id from provider
   type                     String? // card, checking, savings, etc.
   name                     String?
   productCode              String?
@@ -207,21 +132,31 @@ model BankAccount {
   tags                     String?
   currency                 String?
   mask                     String? // last4 or masked number
+  accountNumber            String?
+  sortCode                 String?
   balance                  Float                       @default(0)
   availableBalance         Float?
   limit                    Float?
+  statementBalance         Float?
+  statementDate            DateTime?
+  statementDueDate         DateTime?
+  statementPaidAmount      Float?
   status                   String                      @default("active")
   createdAt                DateTime                    @default(now())
   updatedAt                DateTime                    @updatedAt
   transactions             BankTransaction[]
-  credentials              BankAccountCredential?
+  accountMetas             AccountMeta[]
+
+  @@unique([userId, providerAccountId])
 }
 
 model BankTransaction {
   id                    String      @id @default(uuid())
+  userId                String
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   accountId             String
   account               BankAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  providerTransactionId String      @unique
+  providerTransactionId String
   amount                Float
   currency              String?
   descriptionVia        String?      @map("description")
@@ -235,10 +170,14 @@ model BankTransaction {
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
   meta                  BankTransactionMeta?
+
+  @@unique([userId, providerTransactionId])
 }
 
 model BankTransactionMeta {
   id                 String          @id @default(uuid())
+  userId             String
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   bankTransactionId  String          @unique
   bankTransaction    BankTransaction @relation(fields: [bankTransactionId], references: [id], onDelete: Cascade)
   openingBalance     Float?
@@ -255,47 +194,61 @@ model BankTransactionMeta {
   updatedAt          DateTime        @updatedAt
 }
 
-model BankAccountCredential {
-  id               String       @id @default(uuid())
-  bankAccountId    String       @unique
-  bankAccount      BankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
-  label            String?
+model AccountMeta {
+  id                  String          @id @default(uuid())
+  userId              String
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedBankAccountId String?
+  linkedBankAccount   BankAccount?    @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
+  parentAccountId     String?
+  parentAccount       AccountMeta?    @relation("AccountMetaParent", fields: [parentAccountId], references: [id], onDelete: SetNull)
+  childAccounts       AccountMeta[]   @relation("AccountMetaParent")
+  accountType         AccountType
+  label               String
+  accountHolderName   String?
+  bankName            String?
+  currency            String?
+  internationalAccountNumber String?
+  accountNumber       String?
+  sortCode            String?
+  balance             Float?
+  availableBalance    Float?
+  limit               Float?
+  cardNetwork         String?
+  cardLast4           String?
+  cardImageUrl        String?
+  documentImageUrls   String[]
+  sensitiveDocumentImageUrls String[]
+  statementDay        Int?
+  dueDay              Int?
+  last3StatementDates String?
+  last3DueDates       String?
+  status              String          @default("active")
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  sensitiveInfos      SensitiveInfo[]
+}
+
+model SensitiveInfo {
+  id               String      @id @default(uuid())
+  userId           String
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountMetaId    String
+  accountMeta      AccountMeta @relation(fields: [accountMetaId], references: [id], onDelete: Cascade)
   encryptedPayload String
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 }
 
 model MerchantCategoryRule {
   id          String   @id @default(uuid())
-  merchantKey String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchantKey String
   category    String
   source      String   @default("provider")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-}
 
-model ChatSession {
-  id        String        @id @default(uuid())
-  title     String
-  createdAt DateTime      @default(now())
-  messages  ChatMessage[]
-}
-
-model CardCredential {
-  id               String   @id @default(uuid())
-  cardId           String   @unique
-  card             Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  label            String?
-  encryptedPayload String
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-}
-
-model ChatMessage {
-  id        String      @id @default(uuid())
-  chatId    String
-  chat      ChatSession @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  role      String // user or assistant
-  content   String
-  createdAt DateTime    @default(now())
+  @@unique([userId, merchantKey])
 }

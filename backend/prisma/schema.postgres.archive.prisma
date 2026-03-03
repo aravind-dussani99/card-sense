@@ -1,0 +1,75 @@
+// Archived models for V2 reuse (not used by Prisma client in V1).
+// Keep in sync manually if reintroduced.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Offer {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailId         String // Email message ID to prevent duplicates
+  title           String
+  description     String
+  cardId          String?
+  card            Card?    @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  discountAmount  Float? // Amount saved if offer is used
+  discountPercent Float? // Percentage discount
+  minSpend        Float? // Minimum spend required
+  maxDiscount     Float? // Maximum discount cap
+  startDate       DateTime
+  endDate         DateTime
+  terms           String? // Terms and conditions
+  category        String? // Offer category (cashback, discount, etc.)
+  status          String   @default("active") // "active", "archived", "used"
+  isRead          Boolean  @default(false) // Whether the offer has been read
+  senderEmail     String? // Sender email address for filtering and tracking
+  emailSubject    String?
+  emailBody       String? // Extracted email content
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, emailId])
+}
+
+model ProcessedEmail {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailId          String    // Email message ID
+  emailSubject     String?
+  originalDate     DateTime? // Original email date (when email was sent/received)
+  processedAt      DateTime  @default(now())
+  transactionCount Int       @default(0) // Number of transactions extracted
+  offerCount       Int       @default(0) // Number of offers extracted
+  status           String    @default("processed") // "processed", "failed", "partial"
+  errorMessage     String?
+  emailBody        String? // Store email body for viewing in dialog
+  createdAt        DateTime  @default(now())
+
+  @@unique([userId, emailId])
+}
+
+model ChatSession {
+  id        String        @id @default(uuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  createdAt DateTime      @default(now())
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        String      @id @default(uuid())
+  chatId    String
+  chat      ChatSession @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role      String // user or assistant
+  content   String
+  createdAt DateTime    @default(now())
+}

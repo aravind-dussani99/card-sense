@@ -33,3 +33,16 @@ export function getMonthToDateRange(): { from: string; to: string } {
     to: formatDateInput(today),
   };
 }
+
+export function formatAmount(
+  value: number | null | undefined,
+  options: { currency?: string; fallback?: string } = {}
+): string {
+  const fallback = options.fallback ?? "—";
+  if (value === null || value === undefined || Number.isNaN(value)) return fallback;
+  const formatted = Number(value).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return options.currency ? `${options.currency}${formatted}` : formatted;
+}
