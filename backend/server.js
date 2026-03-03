@@ -82,9 +82,10 @@ const getStorageModeForKey = (key) => {
 const buildDocumentKey = (accountMeta, userId, filename) => {
   const bankSegment = sanitizeSegment(accountMeta.bankName || "unknown");
   const typeSegment = sanitizeSegment(accountMeta.accountType || "unknown");
+  const holderSegment = sanitizeSegment(accountMeta.accountHolderName || "holder");
   const folder = `${bankSegment}_${typeSegment}`;
   const safeName = sanitizeFilename(filename);
-  const uniqueName = `${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+  const uniqueName = `${Date.now()}-${holderSegment}-${crypto.randomUUID()}-${safeName}`;
   const basePath = path.posix.join(GCS_DOCUMENT_PREFIX, folder, userId, accountMeta.id);
   const objectKey = path.posix.join(basePath, uniqueName);
   const storageKey = gcsStorage ? `gcs:${objectKey}` : `local:${objectKey}`;
@@ -971,33 +972,51 @@ app.post("/api/account-meta", async (req, res) => {
     const documentImageUrls = Array.isArray(payload.documentImageUrls)
       ? payload.documentImageUrls.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim())
       : [];
-    const record = await prisma.accountMeta.create({
-      data: {
-        userId,
-        linkedBankAccount: linkedBankAccountId ? { connect: { id: linkedBankAccountId } } : undefined,
-        parentAccountId,
-        accountType: normalizedType,
-        label: String(payload.label),
-        accountHolderName: typeof payload.accountHolderName === "string" ? payload.accountHolderName : null,
-        bankName: typeof payload.bankName === "string" ? payload.bankName : null,
-        currency: typeof payload.currency === "string" ? payload.currency : null,
-        internationalAccountNumber: typeof payload.internationalAccountNumber === "string" ? payload.internationalAccountNumber : null,
-        accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : null,
-        sortCode: typeof payload.sortCode === "string" ? payload.sortCode : null,
-        balance: typeof payload.balance === "number" ? payload.balance : payload.balance ? Number(payload.balance) : null,
-        availableBalance: typeof payload.availableBalance === "number" ? payload.availableBalance : payload.availableBalance ? Number(payload.availableBalance) : null,
-        limit: typeof payload.limit === "number" ? payload.limit : payload.limit ? Number(payload.limit) : null,
-        cardNetwork: typeof payload.cardNetwork === "string" ? payload.cardNetwork : null,
-        cardLast4: typeof payload.cardLast4 === "string" ? payload.cardLast4 : null,
-        cardImageUrl: typeof payload.cardImageUrl === "string" ? payload.cardImageUrl : null,
-        documentImageUrls,
-        statementDay: typeof payload.statementDay === "number" ? payload.statementDay : payload.statementDay ? Number(payload.statementDay) : null,
-        dueDay: typeof payload.dueDay === "number" ? payload.dueDay : payload.dueDay ? Number(payload.dueDay) : null,
-        last3StatementDates: typeof payload.last3StatementDates === "string" ? payload.last3StatementDates : null,
-        last3DueDates: typeof payload.last3DueDates === "string" ? payload.last3DueDates : null,
-        status: typeof payload.status === "string" ? payload.status : "active",
-      },
-    });
+    const sensitiveDocumentImageUrls = Array.isArray(payload.sensitiveDocumentImageUrls)
+      ? payload.sensitiveDocumentImageUrls.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim())
+      : [];
+    const data = {
+      userId,
+      linkedBankAccountId,
+      parentAccountId,
+      accountType: normalizedType,
+      label: String(payload.label),
+      accountHolderName: typeof payload.accountHolderName === "string" ? payload.accountHolderName : null,
+      bankName: typeof payload.bankName === "string" ? payload.bankName : null,
+      currency: typeof payload.currency === "string" ? payload.currency : null,
+      internationalAccountNumber: typeof payload.internationalAccountNumber === "string" ? payload.internationalAccountNumber : null,
+      accountNumber: typeof payload.accountNumber === "string" ? payload.accountNumber : null,
+      sortCode: typeof payload.sortCode === "string" ? payload.sortCode : null,
+      balance: typeof payload.balance === "number" ? payload.balance : payload.balance ? Number(payload.balance) : null,
+      availableBalance: typeof payload.availableBalance === "number" ? payload.availableBalance : payload.availableBalance ? Number(payload.availableBalance) : null,
+      limit: typeof payload.limit === "number" ? payload.limit : payload.limit ? Number(payload.limit) : null,
+      cardNetwork: typeof payload.cardNetwork === "string" ? payload.cardNetwork : null,
+      cardLast4: typeof payload.cardLast4 === "string" ? payload.cardLast4 : null,
+      cardImageUrl: typeof payload.cardImageUrl === "string" ? payload.cardImageUrl : null,
+      documentImageUrls,
+      sensitiveDocumentImageUrls,
+      statementDay: typeof payload.statementDay === "number" ? payload.statementDay : payload.statementDay ? Number(payload.statementDay) : null,
+      dueDay: typeof payload.dueDay === "number" ? payload.dueDay : payload.dueDay ? Number(payload.dueDay) : null,
+      last3StatementDates: typeof payload.last3StatementDates === "string" ? payload.last3StatementDates : null,
+      last3DueDates: typeof payload.last3DueDates === "string" ? payload.last3DueDates : null,
+      status: typeof payload.status === "string" ? payload.status : "active",
+    };
+
+    if (linkedBankAccountId) {
+      const existing = await prisma.accountMeta.findFirst({
+        where: { userId, linkedBankAccountId },
+      });
+      if (existing) {
+        const updated = await prisma.accountMeta.update({
+          where: { id: existing.id },
+          data,
+        });
+        res.json(updated);
+        return;
+      }
+    }
+
+    const record = await prisma.accountMeta.create({ data });
     res.status(201).json(record);
   } catch (error) {
     console.error("Failed to create account metadata:", error);
@@ -1060,32 +1079,31 @@ app.put("/api/account-meta/:id", async (req, res) => {
       parentAccountId = parent.id;
     }
     const hasParentAccountId = Object.prototype.hasOwnProperty.call(payload, "parentAccountId");
-    const parentAccountUpdate = hasParentAccountId
-      ? parentAccountId
-        ? { connect: { id: parentAccountId } }
-        : { disconnect: true }
-      : undefined;
     const normalizedType = payload.accountType ? normalizeAccountType(payload.accountType) : existing.accountType;
     const nextDocumentImageUrls = Array.isArray(payload.documentImageUrls)
       ? payload.documentImageUrls.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim())
       : existing.documentImageUrls;
+    const nextSensitiveDocumentImageUrls = Array.isArray(payload.sensitiveDocumentImageUrls)
+      ? payload.sensitiveDocumentImageUrls.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim())
+      : existing.sensitiveDocumentImageUrls;
     if (Array.isArray(payload.documentImageUrls)) {
       const existingKeys = new Set(existing.documentImageUrls || []);
       const nextKeys = new Set(nextDocumentImageUrls || []);
       const removed = Array.from(existingKeys).filter((key) => !nextKeys.has(key));
       await deleteDocumentKeys(removed);
     }
+    if (Array.isArray(payload.sensitiveDocumentImageUrls)) {
+      const existingKeys = new Set(existing.sensitiveDocumentImageUrls || []);
+      const nextKeys = new Set(nextSensitiveDocumentImageUrls || []);
+      const removed = Array.from(existingKeys).filter((key) => !nextKeys.has(key));
+      await deleteDocumentKeys(removed);
+    }
     const hasLinkedBankAccountId = Object.prototype.hasOwnProperty.call(payload, "linkedBankAccountId");
-    const linkedBankAccountUpdate = hasLinkedBankAccountId
-      ? linkedBankAccountId
-        ? { connect: { id: linkedBankAccountId } }
-        : { disconnect: true }
-      : undefined;
     const updated = await prisma.accountMeta.update({
       where: { id: existing.id },
       data: {
-        linkedBankAccount: linkedBankAccountUpdate,
-        parentAccount: parentAccountUpdate,
+        linkedBankAccountId: hasLinkedBankAccountId ? linkedBankAccountId : existing.linkedBankAccountId,
+        parentAccountId: hasParentAccountId ? parentAccountId : existing.parentAccountId,
         accountType: normalizedType || existing.accountType,
         label: typeof payload.label === "string" ? payload.label : existing.label,
         accountHolderName: typeof payload.accountHolderName === "string" ? payload.accountHolderName : existing.accountHolderName,
@@ -1101,6 +1119,7 @@ app.put("/api/account-meta/:id", async (req, res) => {
         cardLast4: typeof payload.cardLast4 === "string" ? payload.cardLast4 : existing.cardLast4,
         cardImageUrl: typeof payload.cardImageUrl === "string" ? payload.cardImageUrl : existing.cardImageUrl,
         documentImageUrls: nextDocumentImageUrls,
+        sensitiveDocumentImageUrls: nextSensitiveDocumentImageUrls,
         statementDay: payload.statementDay !== undefined ? Number(payload.statementDay) : existing.statementDay,
         dueDay: payload.dueDay !== undefined ? Number(payload.dueDay) : existing.dueDay,
         last3StatementDates: typeof payload.last3StatementDates === "string" ? payload.last3StatementDates : existing.last3StatementDates,
@@ -1126,6 +1145,7 @@ app.delete("/api/account-meta/:id", async (req, res) => {
       return;
     }
     await deleteDocumentKeys(existing.documentImageUrls || []);
+    await deleteDocumentKeys(existing.sensitiveDocumentImageUrls || []);
     await prisma.accountMeta.delete({ where: { id: existing.id } });
     res.status(204).send();
   } catch (error) {
@@ -1187,6 +1207,59 @@ app.post("/api/account-meta/:id/documents", upload.array("files", 10), async (re
   }
 });
 
+app.post("/api/account-meta/:id/sensitive-documents", upload.array("files", 10), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const accountMeta = await prisma.accountMeta.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!accountMeta) {
+      res.status(404).json({ error: "Account metadata not found" });
+      return;
+    }
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (!files.length) {
+      res.status(400).json({ error: "No files uploaded" });
+      return;
+    }
+    const uploaded = [];
+    for (const file of files) {
+      const { objectKey, storageKey } = buildDocumentKey(accountMeta, userId, file.originalname);
+      if (gcsStorage) {
+        const bucket = gcsStorage.bucket(GCS_BUCKET_NAME);
+        await bucket.file(objectKey).save(file.buffer, {
+          contentType: file.mimetype,
+          resumable: false,
+          metadata: { cacheControl: "private, max-age=0, no-store" },
+        });
+      } else {
+        const filePath = resolveLocalPath(objectKey);
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, file.buffer);
+      }
+      uploaded.push({
+        key: storageKey,
+        filename: file.originalname,
+        contentType: file.mimetype,
+      });
+    }
+    const nextSensitiveDocumentImageUrls = [...(accountMeta.sensitiveDocumentImageUrls || []), ...uploaded.map((doc) => doc.key)];
+    try {
+      const updated = await prisma.accountMeta.update({
+        where: { id: accountMeta.id },
+        data: { sensitiveDocumentImageUrls: nextSensitiveDocumentImageUrls },
+      });
+      res.json({ documents: uploaded, sensitiveDocumentImageUrls: updated.sensitiveDocumentImageUrls });
+    } catch (error) {
+      await deleteDocumentKeys(uploaded.map((doc) => doc.key));
+      throw error;
+    }
+  } catch (error) {
+    console.error("Failed to upload sensitive account documents:", error);
+    res.status(500).json({ error: "Failed to upload sensitive documents" });
+  }
+});
+
 app.get("/api/account-meta/:id/documents/:index", async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1198,7 +1271,15 @@ app.get("/api/account-meta/:id/documents/:index", async (req, res) => {
       return;
     }
     const index = Number(req.params.index);
-    const documents = Array.isArray(accountMeta.documentImageUrls) ? accountMeta.documentImageUrls : [];
+    const scope = String(req.query.scope || "standard");
+    const documents =
+      scope === "sensitive"
+        ? Array.isArray(accountMeta.sensitiveDocumentImageUrls)
+          ? accountMeta.sensitiveDocumentImageUrls
+          : []
+        : Array.isArray(accountMeta.documentImageUrls)
+          ? accountMeta.documentImageUrls
+          : [];
     if (!Number.isInteger(index) || index < 0 || index >= documents.length) {
       res.status(404).json({ error: "Document not found" });
       return;
@@ -1868,11 +1949,20 @@ app.get("/api/bank/callback", async (req, res) => {
       },
     });
 
-    const accounts = await fetchAccounts(tokenData.access_token).catch(() => []);
-    const cards = await fetchCards(tokenData.access_token).catch(() => []);
+    const accounts = await fetchAccounts(tokenData.access_token).catch((error) => {
+      console.error("TrueLayer accounts fetch failed (callback)", error?.message || error);
+      return [];
+    });
+    const cards = await fetchCards(tokenData.access_token).catch((error) => {
+      console.error("TrueLayer cards fetch failed (callback)", error?.message || error);
+      return [];
+    });
 
     for (const acct of accounts) {
-      const balancePayload = await fetchAccountBalance(tokenData.access_token, acct.account_id).catch(() => null);
+      const balancePayload = await fetchAccountBalance(tokenData.access_token, acct.account_id).catch((error) => {
+        console.error("TrueLayer account balance fetch failed (callback)", acct.account_id, error?.message || error);
+        return null;
+      });
       const balancePatch = normalizeBalancePayload(balancePayload);
       const rawIban = acct.account_number?.iban || acct.account_number?.number || "";
       const derived = deriveUkAccountDetails(rawIban);
@@ -1914,7 +2004,10 @@ app.get("/api/bank/callback", async (req, res) => {
     for (const card of cards) {
       const providerId = card.card_id || card.account_id || card.resource_id || card.display_name || card.name_on_card;
       if (!providerId) continue;
-      const cardBalancePayload = await fetchCardBalance(tokenData.access_token, providerId).catch(() => null);
+      const cardBalancePayload = await fetchCardBalance(tokenData.access_token, providerId).catch((error) => {
+        console.error("TrueLayer card balance fetch failed (callback)", providerId, error?.message || error);
+        return null;
+      });
       const cardBalancePatch = normalizeBalancePayload(cardBalancePayload);
       await prisma.bankAccount.upsert({
         where: { userId_providerAccountId: { userId, providerAccountId: providerId } },
@@ -1992,7 +2085,10 @@ app.get("/api/bank/callback", async (req, res) => {
     for (const card of cards) {
       const providerId = card.card_id || card.account_id || card.resource_id || card.display_name || card.name_on_card;
       if (!providerId) continue;
-      const txns = await fetchCardTransactions(tokenData.access_token, providerId).catch(() => []);
+      const txns = await fetchCardTransactions(tokenData.access_token, providerId).catch((error) => {
+        console.error("TrueLayer card transactions fetch failed (callback)", providerId, error?.message || error);
+        return [];
+      });
       const accountId = await ensureAccountId(userId, connection.id, providerId, "card");
       for (const tx of txns) {
         const providerTransactionId = tx.transaction_id || tx.id || tx.normalised_provider_transaction_id;
@@ -2071,8 +2167,14 @@ app.post("/api/bank/sync", async (req, res) => {
     let synced = 0;
     for (const connection of connections) {
       try {
-        const accounts = await fetchAccounts(connection.accessToken).catch(() => []);
-        const cards = await fetchCards(connection.accessToken).catch(() => []);
+        const accounts = await fetchAccounts(connection.accessToken).catch((error) => {
+          console.error("TrueLayer accounts fetch failed", connection.id, error?.message || error);
+          return [];
+        });
+        const cards = await fetchCards(connection.accessToken).catch((error) => {
+          console.error("TrueLayer cards fetch failed", connection.id, error?.message || error);
+          return [];
+        });
         const allAccounts = [
           ...accounts
             .map((acct) => ({
@@ -2099,8 +2201,14 @@ app.post("/api/bank/sync", async (req, res) => {
         for (const acct of allAccounts) {
           const balancePayload =
             acct.type === "card"
-              ? await fetchCardBalance(connection.accessToken, acct.id).catch(() => null)
-              : await fetchAccountBalance(connection.accessToken, acct.id).catch(() => null);
+              ? await fetchCardBalance(connection.accessToken, acct.id).catch((error) => {
+                  console.error("TrueLayer card balance fetch failed", connection.id, acct.id, error?.message || error);
+                  return null;
+                })
+              : await fetchAccountBalance(connection.accessToken, acct.id).catch((error) => {
+                  console.error("TrueLayer account balance fetch failed", connection.id, acct.id, error?.message || error);
+                  return null;
+                });
           const balancePatch = normalizeBalancePayload(balancePayload);
           const derived = deriveUkAccountDetails(acct.mask || "");
           const accountNumber = acct.accountNumber || derived.accountNumber || null;
@@ -2140,8 +2248,14 @@ app.post("/api/bank/sync", async (req, res) => {
 
           const txns =
             acct.type === "card"
-              ? await fetchCardTransactions(connection.accessToken, acct.id, fromIso, toIso).catch(() => [])
-              : await fetchTransactions(connection.accessToken, acct.id, fromIso, toIso).catch(() => []);
+              ? await fetchCardTransactions(connection.accessToken, acct.id, fromIso, toIso).catch((error) => {
+                  console.error("TrueLayer card transactions fetch failed", connection.id, acct.id, error?.message || error);
+                  return [];
+                })
+              : await fetchTransactions(connection.accessToken, acct.id, fromIso, toIso).catch((error) => {
+                  console.error("TrueLayer transactions fetch failed", connection.id, acct.id, error?.message || error);
+                  return [];
+                });
           for (const tx of txns) {
             const providerTransactionId = tx.transaction_id || tx.id || tx.normalised_provider_transaction_id;
             if (!providerTransactionId) continue;

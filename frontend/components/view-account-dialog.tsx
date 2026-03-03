@@ -180,12 +180,13 @@ export function ViewAccountDialog({
     accountNumber: "",
     sortCode: "",
     documentImageUrls: [] as string[],
+    sensitiveDocumentImageUrls: [] as string[],
     last3StatementDates: "[]",
     last3DueDates: "[]",
   });
   const [shareOpen, setShareOpen] = useState(false);
   const [copyNoticeOpen, setCopyNoticeOpen] = useState(false);
-  const [documentPreviewIndex, setDocumentPreviewIndex] = useState<number | null>(null);
+  const [documentPreview, setDocumentPreview] = useState<{ index: number; scope: "standard" | "sensitive" } | null>(null);
   const [statementDateInput, setStatementDateInput] = useState("");
   const [statementDueDateInput, setStatementDueDateInput] = useState("");
   const [accountData, setAccountData] = useState({
@@ -290,7 +291,7 @@ export function ViewAccountDialog({
       setSecureUnlocked(false);
       setSecureError(null);
       setDocumentError(null);
-      setDocumentPreviewIndex(null);
+      setDocumentPreview(null);
       setPassphrase("");
       setSecureData({});
       setInitialSnapshot(null);
@@ -323,6 +324,7 @@ export function ViewAccountDialog({
             accountNumber?: string | null;
             sortCode?: string | null;
             documentImageUrls?: string[] | null;
+            sensitiveDocumentImageUrls?: string[] | null;
             last3StatementDates?: string | null;
             last3DueDates?: string | null;
           }>>(`/api/account-meta?linkedBankAccountId=${encodeURIComponent(account.id)}`);
@@ -341,6 +343,7 @@ export function ViewAccountDialog({
               accountNumber: record.accountNumber || account.accountNumber || "",
               sortCode: record.sortCode || account.sortCode || "",
               documentImageUrls: record.documentImageUrls || [],
+              sensitiveDocumentImageUrls: record.sensitiveDocumentImageUrls || [],
               last3StatementDates: record.last3StatementDates || "[]",
               last3DueDates: record.last3DueDates || "[]",
             });
@@ -362,6 +365,7 @@ export function ViewAccountDialog({
               accountNumber: account.accountNumber || "",
               sortCode: account.sortCode || "",
               documentImageUrls: [],
+              sensitiveDocumentImageUrls: [],
               last3StatementDates: "[]",
               last3DueDates: "[]",
             });
@@ -431,6 +435,7 @@ export function ViewAccountDialog({
           accountNumber: accountMetaData.accountNumber || undefined,
           sortCode: accountMetaData.sortCode || undefined,
           documentImageUrls: accountMetaData.documentImageUrls,
+          sensitiveDocumentImageUrls: accountMetaData.sensitiveDocumentImageUrls,
           last3StatementDates: accountMetaData.last3StatementDates || undefined,
           last3DueDates: accountMetaData.last3DueDates || undefined,
           label: accountData.name || account.name || "Account",
@@ -514,6 +519,7 @@ export function ViewAccountDialog({
             accountNumber: accountMetaData.accountNumber || undefined,
             sortCode: accountMetaData.sortCode || undefined,
             documentImageUrls: accountMetaData.documentImageUrls,
+            sensitiveDocumentImageUrls: accountMetaData.sensitiveDocumentImageUrls,
             last3StatementDates: accountMetaData.last3StatementDates || undefined,
             last3DueDates: accountMetaData.last3DueDates || undefined,
             label: accountData.name || account.name || "Account",
@@ -532,6 +538,7 @@ export function ViewAccountDialog({
             accountNumber: accountMetaData.accountNumber || undefined,
             sortCode: accountMetaData.sortCode || undefined,
             documentImageUrls: accountMetaData.documentImageUrls,
+            sensitiveDocumentImageUrls: accountMetaData.sensitiveDocumentImageUrls,
             last3StatementDates: accountMetaData.last3StatementDates || undefined,
             last3DueDates: accountMetaData.last3DueDates || undefined,
             label: accountData.name || account.name || "Account",
@@ -630,12 +637,73 @@ export function ViewAccountDialog({
     }
   };
 
+  const handleSensitiveDocumentUpload = async (files: FileList | null) => {
+    if (!files || !files.length) return;
+    setDocumentError(null);
+    const accepted = Array.from(files).filter((file) => {
+      if (file.size > MAX_DOCUMENT_SIZE_BYTES) return false;
+      if (file.type && !(file.type.startsWith("image/") || file.type === "application/pdf")) return false;
+      return true;
+    });
+    const rejected = Array.from(files).filter((file) => !accepted.includes(file));
+    if (rejected.length) {
+      const message = `Some files were skipped. Max size is ${MAX_DOCUMENT_SIZE_LABEL}.`;
+      setDocumentError(message);
+      setStatusDialog({ title: "Sensitive upload issue", message });
+    }
+    if (!accepted.length) return;
+    try {
+      const metaId = await ensureAccountMeta();
+      if (!metaId) {
+        const message = "Save account details before uploading sensitive documents.";
+        setDocumentError(message);
+        setStatusDialog({ title: "Sensitive upload issue", message });
+        return;
+      }
+      const formData = new FormData();
+      accepted.forEach((file) => formData.append("files", file));
+      const result = await apiFetch<{ sensitiveDocumentImageUrls?: string[] }>(
+        `/api/account-meta/${metaId}/sensitive-documents`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+      const nextList = Array.isArray(result?.sensitiveDocumentImageUrls) ? result.sensitiveDocumentImageUrls : [];
+      setAccountMetaData((prev) => ({
+        ...prev,
+        sensitiveDocumentImageUrls: nextList.length ? nextList : prev.sensitiveDocumentImageUrls,
+      }));
+    } catch (error) {
+      const message = getErrorMessage(error, "Failed to upload sensitive documents.");
+      setDocumentError(message);
+      setStatusDialog({ title: "Sensitive upload failed", message });
+    }
+  };
+
+  const handleRemoveSensitiveDocument = async (index: number) => {
+    try {
+      const metaId = await ensureAccountMeta();
+      if (!metaId) return;
+      const nextList = accountMetaData.sensitiveDocumentImageUrls.filter((_, idx) => idx !== index);
+      setAccountMetaData((prev) => ({ ...prev, sensitiveDocumentImageUrls: nextList }));
+      await apiFetch(`/api/account-meta/${metaId}`, {
+        method: "PUT",
+        body: JSON.stringify({ sensitiveDocumentImageUrls: nextList }),
+      });
+    } catch (error) {
+      const message = getErrorMessage(error, "Failed to remove sensitive document.");
+      setDocumentError(message);
+      setStatusDialog({ title: "Sensitive removal failed", message });
+    }
+  };
+
   const stripKeyPrefix = (value: string) => value.replace(/^local:|^gcs:/, "");
   const isInlineData = (value: string) => value.startsWith("data:");
   const isImageKey = (value: string) =>
     isInlineData(value) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(stripKeyPrefix(value));
-  const getDocumentUrl = (metaId: string, index: number) =>
-    `${getApiBaseUrl()}/api/account-meta/${metaId}/documents/${index}`;
+  const getDocumentUrl = (metaId: string, index: number, scope: "standard" | "sensitive" = "standard") =>
+    `/api/account-meta/${metaId}/documents/${index}?scope=${scope}`;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -663,13 +731,15 @@ export function ViewAccountDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
-          <div className="grid gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="bankName">Bank Name</Label>
-              <Input id="bankName" value={accountData.name || bankLabel} readOnly />
+              <Input
+                id="bankName"
+                value={accountMetaData.bankName}
+                onChange={(e) => setAccountMetaData((prev) => ({ ...prev, bankName: e.target.value }))}
+              />
             </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="accountHolderName">Account Holder Name</Label>
               <Input
@@ -735,7 +805,7 @@ export function ViewAccountDialog({
               </>
             )}
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className={context === "bank" ? "grid grid-cols-3 gap-4" : "grid grid-cols-4 gap-4"}>
             <div className="space-y-2">
               <Label htmlFor="currency">Currency</Label>
               <Input
@@ -767,9 +837,7 @@ export function ViewAccountDialog({
                 onChange={(e) => setAccountData((prev) => ({ ...prev, availableBalance: Number(e.target.value) }))}
               />
             </div>
-          </div>
-          {context !== "bank" && (
-            <div className="grid grid-cols-3 gap-4">
+            {context !== "bank" && (
               <div className="space-y-2">
                 <Label htmlFor="limit">{limitLabel}</Label>
                 <Input
@@ -781,8 +849,8 @@ export function ViewAccountDialog({
                   onChange={(e) => setAccountData((prev) => ({ ...prev, limit: Number(e.target.value) }))}
                 />
               </div>
-            </div>
-          )}
+            )}
+          </div>
           <div className="space-y-2">
             <Label>Document Images</Label>
             <div className="flex flex-wrap items-center gap-2">
@@ -792,11 +860,11 @@ export function ViewAccountDialog({
                   role="button"
                   tabIndex={0}
                   className="group relative h-12 w-12 overflow-hidden rounded-md border"
-                  onClick={() => setDocumentPreviewIndex(index)}
+                  onClick={() => setDocumentPreview({ index, scope: "standard" })}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      setDocumentPreviewIndex(index);
+                      setDocumentPreview({ index, scope: "standard" });
                     }
                   }}
                 >
@@ -1020,9 +1088,71 @@ export function ViewAccountDialog({
                     value={secureData.statementPassword || ""}
                     onChange={(e) => setSecureData((prev) => ({ ...prev, statementPassword: e.target.value }))}
                   />
-                </div>
               </div>
+            </div>
+          )}
+
+          <div className="rounded-lg border p-4 space-y-3">
+            <div className="text-sm font-semibold">Sensitive documents</div>
+            {!secureUnlocked ? (
+              <p className="text-xs text-muted-foreground">
+                Unlock sensitive fields to view or upload sensitive documents.
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  {accountMetaData.sensitiveDocumentImageUrls.map((url, index) => (
+                    <div
+                      key={`${url}-${index}`}
+                      role="button"
+                      tabIndex={0}
+                      className="group relative h-12 w-12 overflow-hidden rounded-md border"
+                      onClick={() => setDocumentPreview({ index, scope: "sensitive" })}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setDocumentPreview({ index, scope: "sensitive" });
+                        }
+                      }}
+                    >
+                      {isImageKey(url) ? (
+                        <img
+                          src={isInlineData(url) ? url : getDocumentUrl(accountMetaId, index, "sensitive")}
+                          alt="Sensitive document"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-slate-50 text-[10px] font-semibold text-slate-500">
+                          FILE
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-xs opacity-0 shadow-sm transition group-hover:opacity-100"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleRemoveSensitiveDocument(index);
+                        }}
+                        aria-label="Remove sensitive image"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <label className="flex h-12 w-12 cursor-pointer items-center justify-center rounded-md border border-dashed text-muted-foreground hover:text-foreground">
+                    <Plus className="h-4 w-4" />
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => void handleSensitiveDocumentUpload(e.target.files)}
+                    />
+                  </label>
+                </div>
+              </>
             )}
+          </div>
             <p className="text-xs text-muted-foreground">
               Sensitive fields are encrypted before saving.
             </p>
@@ -1099,18 +1229,29 @@ export function ViewAccountDialog({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <Dialog open={documentPreviewIndex !== null} onOpenChange={() => setDocumentPreviewIndex(null)}>
+        <Dialog open={documentPreview !== null} onOpenChange={() => setDocumentPreview(null)}>
           <DialogContent className="sm:max-w-[640px]">
             <DialogHeader>
               <DialogTitle>Document preview</DialogTitle>
+              <DialogDescription>Preview the uploaded document.</DialogDescription>
             </DialogHeader>
-            {accountMetaId && documentPreviewIndex !== null && (
-              isImageKey(accountMetaData.documentImageUrls[documentPreviewIndex]) ? (
+            {accountMetaId && documentPreview !== null && (
+              isImageKey(
+                documentPreview.scope === "sensitive"
+                  ? accountMetaData.sensitiveDocumentImageUrls[documentPreview.index]
+                  : accountMetaData.documentImageUrls[documentPreview.index]
+              ) ? (
                 <img
                   src={
-                    isInlineData(accountMetaData.documentImageUrls[documentPreviewIndex])
-                      ? accountMetaData.documentImageUrls[documentPreviewIndex]
-                      : getDocumentUrl(accountMetaId, documentPreviewIndex)
+                    isInlineData(
+                      documentPreview.scope === "sensitive"
+                        ? accountMetaData.sensitiveDocumentImageUrls[documentPreview.index]
+                        : accountMetaData.documentImageUrls[documentPreview.index]
+                    )
+                      ? documentPreview.scope === "sensitive"
+                        ? accountMetaData.sensitiveDocumentImageUrls[documentPreview.index]
+                        : accountMetaData.documentImageUrls[documentPreview.index]
+                      : getDocumentUrl(accountMetaId, documentPreview.index, documentPreview.scope)
                   }
                   alt="Document preview"
                   className="h-auto w-full rounded-md border object-contain"
@@ -1118,7 +1259,7 @@ export function ViewAccountDialog({
               ) : (
                 <iframe
                   title="Document preview"
-                  src={getDocumentUrl(accountMetaId, documentPreviewIndex)}
+                  src={getDocumentUrl(accountMetaId, documentPreview.index, documentPreview.scope)}
                   className="h-[70vh] w-full rounded-md border"
                 />
               )

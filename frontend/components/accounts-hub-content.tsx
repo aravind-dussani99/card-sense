@@ -28,6 +28,24 @@ const isOverdraft = (account: BankAccount) => {
     return type.includes("overdraft") || name.includes("overdraft") || (account.limit ?? 0) > 0;
 };
 
+const parseDateList = (value?: string | null) => {
+    if (!value) return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+    } catch {
+        return [];
+    }
+};
+
+const getLatestDate = (dates: string[]) => {
+    const parsed = dates
+        .map((value) => new Date(value))
+        .filter((value) => !Number.isNaN(value.getTime()))
+        .sort((a, b) => b.getTime() - a.getTime());
+    return parsed.length ? parsed[0] : null;
+};
+
 const PlaceholderTile = ({ label }: { label: string }) => (
     <div className="rounded-xl border border-dashed border-muted-foreground/30 bg-muted/20 p-5 text-muted-foreground/60 backdrop-blur-sm">
         <div className="text-xs uppercase tracking-wide">Placeholder</div>
@@ -38,6 +56,17 @@ const PlaceholderTile = ({ label }: { label: string }) => (
 );
 
 export function AccountsHubContent({ bankAccounts, accountMetas }: AccountsHubContentProps) {
+    const linkedMetaByAccountId = useMemo(() => {
+        const map = new Map<string, AccountMeta>();
+        accountMetas
+            .filter((acct) => acct.linkedBankAccountId)
+            .forEach((acct) => {
+                if (acct.linkedBankAccountId) {
+                    map.set(acct.linkedBankAccountId, acct);
+                }
+            });
+        return map;
+    }, [accountMetas]);
     const secureAccounts = useMemo(
         () =>
             accountMetas
@@ -65,26 +94,44 @@ export function AccountsHubContent({ bankAccounts, accountMetas }: AccountsHubCo
     );
     const mergedBankAccounts = useMemo(
         () => [
-            ...bankAccounts.map((acct) => ({ ...acct, source: "bank" as const })),
+            ...bankAccounts.map((acct) => {
+                const linkedMeta = linkedMetaByAccountId.get(acct.id);
+                const statementDates = parseDateList(linkedMeta?.last3StatementDates);
+                const dueDates = parseDateList(linkedMeta?.last3DueDates);
+                const latestStatement = getLatestDate(statementDates);
+                const latestDue = getLatestDate(dueDates);
+                const fallbackName = acct.name;
+                return {
+                    ...acct,
+                    name: linkedMeta?.bankName || linkedMeta?.label || fallbackName,
+                    accountNumber: linkedMeta?.accountNumber || acct.accountNumber,
+                    sortCode: linkedMeta?.sortCode || acct.sortCode,
+                    mask: linkedMeta?.cardLast4 || acct.mask,
+                    statementDate: latestStatement ? latestStatement.toISOString() : acct.statementDate,
+                    statementDueDate: latestDue ? latestDue.toISOString() : acct.statementDueDate,
+                    tags: linkedMeta?.bankName ? `bank:${linkedMeta.bankName}` : acct.tags,
+                    source: "bank" as const,
+                };
+            }),
             ...secureAccounts,
         ],
-        [bankAccounts, secureAccounts]
+        [bankAccounts, linkedMetaByAccountId, secureAccounts]
     );
     const overdraftAccounts = useMemo(
         () =>
             mergedBankAccounts.filter((acct) => {
                 const type = (acct.type || "").toLowerCase();
-                return (acct.limit ?? 0) > 0 && !((acct.type || "").toLowerCase().includes("card") || (acct.type || "").toLowerCase().includes("credit"));
+                return (acct.limit ?? 0) > 0 && !(type.includes("card") || type.includes("credit"));
             }),
         [mergedBankAccounts]
     );
     const cardAccounts = useMemo(
         () =>
-            bankAccounts.filter((acct) => {
+            mergedBankAccounts.filter((acct) => {
                 const type = (acct.type || "").toLowerCase();
-                return type.includes("card") || type.includes("credit");
+                return (acct.source === "bank") && (type.includes("card") || type.includes("credit"));
             }),
-        [bankAccounts]
+        [mergedBankAccounts]
     );
     const standardAccounts = useMemo(
         () =>

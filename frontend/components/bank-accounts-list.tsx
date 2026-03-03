@@ -78,6 +78,17 @@ export function BankAccountsList({
         return { sortCode: match[1], accountNumber: match[2] };
     };
 
+    const formatShortDate = (value?: string | null) => {
+        if (!value) return "—";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "—";
+        return date.toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+        });
+    };
+
     return (
         <div className="space-y-3">
             {feedback && (
@@ -154,6 +165,8 @@ export function BankAccountsList({
                             : statementBalance !== null
                                 ? Math.max(0, statementBalance - (statementPaid ?? 0))
                                 : null;
+                    const statementDateText = formatShortDate(acct.statementDate);
+                    const statementDueText = formatShortDate(acct.statementDueDate);
                     return (
                         <div key={acct.id} className="p-3 rounded-lg border shadow-sm flex flex-col gap-2 w-full">
                             <div className="text-xs text-muted-foreground">
@@ -221,6 +234,10 @@ export function BankAccountsList({
                             )}
                             {isCard && (
                                 <div className="text-xs text-muted-foreground space-y-1">
+                                    <div className="flex flex-wrap gap-2">
+                                        <span>Statement date: {statementDateText}</span>
+                                        <span>Due date: {statementDueText}</span>
+                                    </div>
                                     <div className="flex flex-wrap gap-2">
                                         <span>Statement: {formatAmount(statementBalance)}</span>
                                         <span>Paid: {formatAmount(statementPaid)}</span>

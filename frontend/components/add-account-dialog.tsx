@@ -264,14 +264,6 @@ export function AddAccountDialog({ open: controlledOpen, onOpenChange, prefillDa
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label htmlFor="accountHolderName">Account Holder Name</Label>
-                                <Input
-                                    id="accountHolderName"
-                                    name="accountHolderName"
-                                    placeholder="e.g. Aravind Reddy"
-                                />
-                            </div>
-                            <div className="space-y-2">
                                 <Label htmlFor="bankName">Bank Name</Label>
                                 <Input
                                     id="bankName"
@@ -287,6 +279,14 @@ export function AddAccountDialog({ open: controlledOpen, onOpenChange, prefillDa
                                         <option key={name} value={name} />
                                     ))}
                                 </datalist>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="accountHolderName">Account Holder Name</Label>
+                                <Input
+                                    id="accountHolderName"
+                                    name="accountHolderName"
+                                    placeholder="e.g. Aravind Reddy"
+                                />
                             </div>
                         </div>
 

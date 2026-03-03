@@ -304,16 +304,6 @@ export function AddCardDialog({ open: controlledOpen, onOpenChange, prefillData 
 
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label htmlFor="accountHolderName">Account Holder Name</Label>
-                                <Input
-                                    id="accountHolderName"
-                                    name="accountHolderName"
-                                    placeholder="e.g. Aravind Reddy"
-                                    value={accountHolderName}
-                                    onChange={(e) => setAccountHolderName(e.target.value)}
-                                />
-                            </div>
-                            <div className="space-y-2">
                                 <Label htmlFor="bankName">Bank Name</Label>
                                 <Input
                                     id="bankName"
@@ -329,6 +319,16 @@ export function AddCardDialog({ open: controlledOpen, onOpenChange, prefillData 
                                         <option key={name} value={name} />
                                     ))}
                                 </datalist>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="accountHolderName">Account Holder Name</Label>
+                                <Input
+                                    id="accountHolderName"
+                                    name="accountHolderName"
+                                    placeholder="e.g. Aravind Reddy"
+                                    value={accountHolderName}
+                                    onChange={(e) => setAccountHolderName(e.target.value)}
+                                />
                             </div>
                         </div>
 

@@ -365,17 +365,17 @@ export function ViewAccountMetaDialog({
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Account Holder Name</Label>
-                <Input
-                  value={record.accountHolderName || ""}
-                  onChange={(e) => setRecord((prev) => prev ? { ...prev, accountHolderName: e.target.value } : prev)}
-                />
-              </div>
-              <div className="space-y-2">
                 <Label>Bank Name</Label>
                 <Input
                   value={record.bankName || ""}
                   onChange={(e) => setRecord((prev) => prev ? { ...prev, bankName: e.target.value } : prev)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Account Holder Name</Label>
+                <Input
+                  value={record.accountHolderName || ""}
+                  onChange={(e) => setRecord((prev) => prev ? { ...prev, accountHolderName: e.target.value } : prev)}
                 />
               </div>
             </div>

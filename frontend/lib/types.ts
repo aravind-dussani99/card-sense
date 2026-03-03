@@ -139,6 +139,7 @@ export type AccountMeta = {
   cardLast4?: string | null;
   cardImageUrl?: string | null;
   documentImageUrls?: string[] | null;
+  sensitiveDocumentImageUrls?: string[] | null;
   statementDay?: number | null;
   dueDay?: number | null;
   last3StatementDates?: string | null;

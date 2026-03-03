@@ -218,6 +218,7 @@ model AccountMeta {
   cardLast4           String?
   cardImageUrl        String?
   documentImageUrls   String[]
+  sensitiveDocumentImageUrls String[]
   statementDay        Int?
   dueDay              Int?
   last3StatementDates String?
